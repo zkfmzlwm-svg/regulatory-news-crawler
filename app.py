@@ -24,6 +24,37 @@ FORMAT_CONFIG = BASE_DIR / "config" / "summary_format.yaml"
 OUTPUT_DIR = BASE_DIR / "output"
 
 st.set_page_config(page_title="해외 의약품 규제 뉴스 크롤러", layout="wide")
+st.title("해외 의약품 규제 뉴스 크롤러")
+
+
+def _check_password() -> bool:
+    """st.secrets 에 APP_PASSWORD 가 설정된 경우에만 비밀번호를 요구.
+
+    배포(예: Streamlit Community Cloud)해서 링크가 외부에 노출되었을 때,
+    아무나 AI 요약(토큰 사용) 버튼을 눌러 API 비용이 나가는 것을 막기 위한 최소한의 보호장치.
+    """
+    try:
+        required = st.secrets.get("APP_PASSWORD")
+    except Exception:
+        required = None
+    if not required:
+        return True  # 비밀번호 미설정 (로컬 실행 등) 시 그냥 통과
+
+    if st.session_state.get("authenticated"):
+        return True
+
+    pw = st.text_input("접속 비밀번호", type="password")
+    if pw:
+        if pw == required:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("비밀번호가 올바르지 않습니다.")
+    return False
+
+
+if not _check_password():
+    st.stop()
 
 
 @st.cache_resource
@@ -32,8 +63,6 @@ def get_storage() -> Storage:
 
 
 store = get_storage()
-
-st.title("해외 의약품 규제 뉴스 크롤러")
 
 # ---------------- 사이드바: 수집 / 필터 / 사이트 관리 ----------------
 with st.sidebar:

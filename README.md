@@ -88,8 +88,8 @@ python main.py add-source --name "My Site" --url "https://example.com/news" --ty
 - 링크: [Responding to FDA Form 483 Observations at the Conclusion of a Drug CGMP Inspection | FDA](https://www.fda.gov/...)
 ```
 
-- 번호(`1.`), `[태그]`, 마지막 `- 링크:` 줄은 프로그램이 자동으로 채웁니다(태그는 `config/sources.yaml` 의 `tag` 값).
-- 한글 제목과 본문 불릿(`- ` / 하위 항목 `  : `)은 AI가 `style_example` 과 `instruction` 을 참고해 채웁니다.
+- 번호(`1.`), `[태그]`, 제목(원문 영문 그대로), 마지막 `- 링크:` 줄은 프로그램이 자동으로 채웁니다(태그는 `config/sources.yaml` 의 `tag` 값).
+- 본문 불릿(`- ` / 하위 항목 `  : `)만 AI가 `style_example` 과 `instruction` 을 참고해 한국어로 번역/요약해 채웁니다.
 - 원하는 형식으로 바꾸고 싶으면 `style_example` 을 원하는 예시로 교체하고 `instruction` 을 그에 맞게 수정하면 됩니다.
 - `output_format: md | txt | docx` 로 저장 형식을 바꿀 수 있습니다.
 
@@ -103,6 +103,27 @@ python main.py summarize
 ```
 
 API 키가 없으면 번역·분석 없이 원문 문장을 추출해 채우는 단순 요약으로 자동 대체됩니다(오프라인에서도 동작).
+
+## 다른 사람(비개발자)과 공유하기 — Streamlit Community Cloud 배포
+
+코드 설치 없이 링크만으로 다른 사람이 웹 화면을 쓰게 하려면 **Streamlit Community Cloud**(무료)에 배포하면 됩니다.
+
+1. 이 저장소를 GitHub에 푸시 (이미 되어 있다면 생략)
+2. https://share.streamlit.io 접속 → GitHub 계정으로 로그인
+3. "New app" 클릭 → 이 저장소 선택 → Branch: `claude/brave-bell-dce54l`, Main file path: `app.py`
+4. 배포 전 **"Advanced settings" → "Secrets"** 에 아래 내용을 붙여넣기 (형식은 `.streamlit/secrets.toml.example` 참고)
+   ```toml
+   ANTHROPIC_API_KEY = "sk-ant-..."
+   APP_PASSWORD = "팀에서 공유할 비밀번호"
+   ```
+   - `APP_PASSWORD` 를 설정하면 접속 시 비밀번호를 물어봅니다. **이 저장소는 공개(public)** 이므로, 링크가 알려지면 누구나 AI 요약(토큰 사용) 버튼을 눌러 내 API 비용이 나갈 수 있습니다 — 팀 내부 공유용이라면 꼭 설정하세요.
+5. "Deploy" 클릭 → 몇 분 뒤 `https://xxxx.streamlit.app` 형태의 공개 링크 생성됨
+6. 이 링크 + `APP_PASSWORD` 를 사용할 사람들에게 전달
+
+**참고할 점**
+- 클라우드 인스턴스는 일정 시간 비활성 시 잠들거나 재시작될 수 있어, 그때마다 수집된 기사(`data/articles.db`)가 초기화될 수 있습니다 — 재시작 후 "🔄 기사 수집 실행"을 다시 눌러주면 됩니다.
+- `config/sources.yaml` 의 "사이트 추가"로 저장한 내용도 재배포/재시작 시 초기화될 수 있으니, 자주 쓰는 사이트는 저장소의 `config/sources.yaml` 에 직접 커밋해두는 것을 권장합니다.
+- 비개발자에게 설치 없이 쓰게 하는 게 목적이 아니라면(예: 기술팀 내부 공유), 그냥 GitHub 저장소를 공유하고 각자 `pip install -r requirements.txt` 후 `streamlit run app.py` 로 로컬 실행하게 하는 편이 더 간단하고 API 키도 각자 관리할 수 있습니다.
 
 ## 참고
 

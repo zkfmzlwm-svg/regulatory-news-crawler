@@ -7,3 +7,4 @@ output/*.md
 output/*.txt
 output/*.docx
 .env
+.streamlit/secrets.toml
