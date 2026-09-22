@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
     region TEXT,
+    tag TEXT,
     title TEXT NOT NULL,
     url TEXT NOT NULL UNIQUE,
     published_at TEXT,
@@ -31,6 +32,10 @@ class Storage:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            try:
+                conn.execute("ALTER TABLE articles ADD COLUMN tag TEXT")
+            except sqlite3.OperationalError:
+                pass  # column already exists (pre-existing DB)
 
     @contextmanager
     def _connect(self):
@@ -50,9 +55,9 @@ class Storage:
                 try:
                     conn.execute(
                         """INSERT INTO articles
-                           (source, region, title, url, published_at, excerpt, collected_at, checked, summarized)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)""",
-                        (a.source, a.region, a.title, a.url, a.published_at, a.excerpt, a.collected_at),
+                           (source, region, tag, title, url, published_at, excerpt, collected_at, checked, summarized)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)""",
+                        (a.source, a.region, a.tag, a.title, a.url, a.published_at, a.excerpt, a.collected_at),
                     )
                     added += 1
                 except sqlite3.IntegrityError:
@@ -134,6 +139,7 @@ class Storage:
             id=row["id"],
             source=row["source"],
             region=row["region"] or "",
+            tag=row["tag"] or "",
             title=row["title"],
             url=row["url"],
             published_at=row["published_at"],

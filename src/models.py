@@ -8,6 +8,7 @@ class Article:
     id: Optional[int] = None
     source: str = ""
     region: str = ""
+    tag: str = ""
     title: str = ""
     url: str = ""
     published_at: Optional[str] = None  # ISO 8601 string

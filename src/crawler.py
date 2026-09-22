@@ -46,10 +46,15 @@ def _normalize_date(value) -> Optional[str]:
         return None
 
 
+def _default_tag(source: Dict) -> str:
+    return source.get("tag") or source["name"].split(" - ")[0].split(" (")[0].strip()
+
+
 def crawl_rss(source: Dict) -> List[Article]:
     name = source["name"]
     url = source["url"]
     region = source.get("region", "")
+    tag = _default_tag(source)
     articles: List[Article] = []
     try:
         resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT)
@@ -74,6 +79,7 @@ def crawl_rss(source: Dict) -> List[Article]:
             Article(
                 source=name,
                 region=region,
+                tag=tag,
                 title=title,
                 url=link,
                 published_at=published,
@@ -87,6 +93,7 @@ def crawl_html(source: Dict) -> List[Article]:
     name = source["name"]
     url = source["url"]
     region = source.get("region", "")
+    tag = _default_tag(source)
     selectors = source.get("selectors", {})
     item_sel = selectors.get("item")
     title_sel = selectors.get("title")
@@ -137,6 +144,7 @@ def crawl_html(source: Dict) -> List[Article]:
             Article(
                 source=name,
                 region=region,
+                tag=tag,
                 title=title,
                 url=link,
                 published_at=published,

@@ -9,7 +9,7 @@ from .crawler import crawl_all, load_sources, save_sources
 from .fetcher import fetch_full_text
 from .models import Article
 from .storage import DEFAULT_DB_PATH, Storage
-from .summarizer import load_format, summarize_article, write_summaries
+from .summarizer import SummaryEntry, load_format, summarize_article, write_summaries
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCES_CONFIG = BASE_DIR / "config" / "sources.yaml"
@@ -129,12 +129,12 @@ def cmd_summarize(args):
         return
 
     fmt = load_format(args.format_config)
-    entries = []
-    for a in articles:
-        print(f"요약 중: [{a.source}] {a.title}")
+    entries: List[SummaryEntry] = []
+    for i, a in enumerate(articles, start=1):
+        print(f"요약 중: [{a.tag or a.source}] {a.title}")
         full_text = fetch_full_text(a.url)
-        values = summarize_article(a, full_text, fmt)
-        entries.append(values)
+        title_kr, body = summarize_article(a, full_text, fmt)
+        entries.append(SummaryEntry(index=i, article=a, title_kr=title_kr, body=body))
 
     if args.output:
         output_path = args.output

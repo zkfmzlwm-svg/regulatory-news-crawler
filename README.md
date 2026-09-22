@@ -57,21 +57,24 @@ python main.py add-source --name "My Site" --url "https://example.com/news" --ty
 
 ## 요약 서식 커스터마이징
 
-`config/summary_format.yaml` 에서 요약 결과에 어떤 항목이 들어갈지 자유롭게 정의합니다.
+`config/summary_format.yaml` 의 `style_example` 이 곧 요약 결과의 서식입니다. 기본값은 아래 형태로 되어 있습니다.
 
-```yaml
-output_format: "md"   # md | txt | docx
-fields:
-  - key: "title_kr"
-    label: "제목(국문)"
-    instruction: "기사 제목을 자연스러운 한국어로 번역"
-  - key: "summary"
-    label: "핵심 요약"
-    instruction: "핵심 내용을 불릿 3~5개로 요약"
-  ...
+```
+1. [FDA] Form 483 Observation 의 답변 Guideline 초안 발표
+- 기업들이 Form 483 답변서가 데이터 누락, 구조적 결함, 근본 원인 분석 미흡 등 '부적절'한 경우가 많았음
+- 핵심 권장사항
+  : 구조적이고 리스크 기반(Risk-based) 접근 방식을 취해야 함
+  : 단순 수정이 아닌 근본 원인(Root Cause) 을 파악하고 최종 사용자에게 미칠 영향을 평가해야 함
+  : 적절한 CAPA 를 구현해야 함
+- 제출 Format, 중간 보고서 작성, 과학적/기술적 이견이 있을 때의 처리 방법 등도 언급
+- 5월 8일까지 초안에 대한 의견 수렴 중
+- 링크: [Responding to FDA Form 483 Observations at the Conclusion of a Drug CGMP Inspection | FDA](https://www.fda.gov/...)
 ```
 
-`instruction` 은 AI 요약 시 각 항목에 어떤 내용을 채울지 지시하는 문구이므로, 원하는 서식/관점(예: "임상시험 영향 중심으로 정리", "GMP 담당자 관점에서 정리")으로 자유롭게 수정하면 됩니다.
+- 번호(`1.`), `[태그]`, 마지막 `- 링크:` 줄은 프로그램이 자동으로 채웁니다(태그는 `config/sources.yaml` 의 `tag` 값).
+- 한글 제목과 본문 불릿(`- ` / 하위 항목 `  : `)은 AI가 `style_example` 과 `instruction` 을 참고해 채웁니다.
+- 원하는 형식으로 바꾸고 싶으면 `style_example` 을 원하는 예시로 교체하고 `instruction` 을 그에 맞게 수정하면 됩니다.
+- `output_format: md | txt | docx` 로 저장 형식을 바꿀 수 있습니다.
 
 ## 번역·분석 품질을 높이려면 (선택)
 

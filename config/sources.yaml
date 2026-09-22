@@ -2,6 +2,7 @@
 #
 # type: rss  -> RSS/Atom 피드 URL (feedparser 사용)
 # type: html -> RSS가 없는 사이트를 위한 목록 페이지 스크래핑 (CSS 선택자 필요)
+# tag:  -> 요약 결과 제목에 붙는 "[태그]" 표기 (예: [FDA]). 생략하면 name 앞부분으로 자동 지정
 #
 # 사이트를 추가하려면 `python main.py add-source` 명령을 쓰거나
 # 이 파일에 직접 항목을 추가하면 됩니다.
@@ -13,60 +14,70 @@ sources:
     type: rss
     url: "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml"
     region: "US"
+    tag: "FDA"
     enabled: true
 
   - name: "FDA - Drug Safety & Availability"
     type: rss
     url: "https://www.fda.gov/drugs/drug-safety-and-availability/rss.xml"
     region: "US"
+    tag: "FDA"
     enabled: true
 
   - name: "EMA - News"
     type: rss
     url: "https://www.ema.europa.eu/en/news.xml"
     region: "EU"
+    tag: "EMA"
     enabled: true
 
   - name: "MHRA (UK) - News & Communications"
     type: rss
     url: "https://www.gov.uk/government/organisations/medicines-and-healthcare-products-regulatory-agency.atom"
     region: "UK"
+    tag: "MHRA"
     enabled: true
 
   - name: "Health Canada - Recalls & Safety Alerts"
     type: rss
     url: "https://recalls-rappels.canada.ca/en/feed"
     region: "CA"
+    tag: "Health Canada"
     enabled: true
 
   - name: "TGA (Australia) - News"
     type: rss
     url: "https://www.tga.gov.au/rss.xml"
     region: "AU"
+    tag: "TGA"
     enabled: true
 
   - name: "WHO - News"
     type: rss
     url: "https://www.who.int/rss-feeds/news-english.xml"
     region: "Global"
+    tag: "WHO"
     enabled: true
 
   - name: "RAPS Regulatory Focus"
     type: rss
     url: "https://www.raps.org/rss/news"
     region: "Global"
+    tag: "RAPS"
     enabled: true
 
   - name: "Endpoints News - Regulatory"
     type: rss
     url: "https://endpts.com/category/regulatory/feed/"
     region: "Global"
+    tag: "Endpoints"
     enabled: true
 
   - name: "FiercePharma"
     type: rss
     url: "https://www.fiercepharma.com/rss/xml"
     region: "Global"
+    tag: "FiercePharma"
     enabled: true
 
   # ---------------- 사용자 지정 사이트 (예시, 필요시 수정/추가) ----------------
@@ -74,6 +85,7 @@ sources:
   #   type: html
   #   url: "https://example.com/regulatory-news"
   #   region: "Custom"
+  #   tag: "MySite"
   #   enabled: true
   #   selectors:
   #     item: "div.news-list li"      # 각 기사 블록
