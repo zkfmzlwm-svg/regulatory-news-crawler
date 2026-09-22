@@ -1,0 +1,83 @@
+# 의약품 규제 뉴스 수집 대상 사이트 설정
+#
+# type: rss  -> RSS/Atom 피드 URL (feedparser 사용)
+# type: html -> RSS가 없는 사이트를 위한 목록 페이지 스크래핑 (CSS 선택자 필요)
+#
+# 사이트를 추가하려면 `python main.py add-source` 명령을 쓰거나
+# 이 파일에 직접 항목을 추가하면 됩니다.
+# 각 소스는 name(고유)으로 구분됩니다. enabled: false 로 임시 비활성화 가능.
+
+sources:
+  # ---------------- 주요 해외 규제기관 (기본 제공) ----------------
+  - name: "FDA - Press Announcements"
+    type: rss
+    url: "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml"
+    region: "US"
+    enabled: true
+
+  - name: "FDA - Drug Safety & Availability"
+    type: rss
+    url: "https://www.fda.gov/drugs/drug-safety-and-availability/rss.xml"
+    region: "US"
+    enabled: true
+
+  - name: "EMA - News"
+    type: rss
+    url: "https://www.ema.europa.eu/en/news.xml"
+    region: "EU"
+    enabled: true
+
+  - name: "MHRA (UK) - News & Communications"
+    type: rss
+    url: "https://www.gov.uk/government/organisations/medicines-and-healthcare-products-regulatory-agency.atom"
+    region: "UK"
+    enabled: true
+
+  - name: "Health Canada - Recalls & Safety Alerts"
+    type: rss
+    url: "https://recalls-rappels.canada.ca/en/feed"
+    region: "CA"
+    enabled: true
+
+  - name: "TGA (Australia) - News"
+    type: rss
+    url: "https://www.tga.gov.au/rss.xml"
+    region: "AU"
+    enabled: true
+
+  - name: "WHO - News"
+    type: rss
+    url: "https://www.who.int/rss-feeds/news-english.xml"
+    region: "Global"
+    enabled: true
+
+  - name: "RAPS Regulatory Focus"
+    type: rss
+    url: "https://www.raps.org/rss/news"
+    region: "Global"
+    enabled: true
+
+  - name: "Endpoints News - Regulatory"
+    type: rss
+    url: "https://endpts.com/category/regulatory/feed/"
+    region: "Global"
+    enabled: true
+
+  - name: "FiercePharma"
+    type: rss
+    url: "https://www.fiercepharma.com/rss/xml"
+    region: "Global"
+    enabled: true
+
+  # ---------------- 사용자 지정 사이트 (예시, 필요시 수정/추가) ----------------
+  # - name: "My Custom Source"
+  #   type: html
+  #   url: "https://example.com/regulatory-news"
+  #   region: "Custom"
+  #   enabled: true
+  #   selectors:
+  #     item: "div.news-list li"      # 각 기사 블록
+  #     title: "a.title"              # 블록 내 제목 요소
+  #     link: "a.title"               # 블록 내 링크 요소 (href 사용)
+  #     date: "span.date"             # 블록 내 날짜 요소 (선택)
+  #     summary: "p.excerpt"          # 블록 내 요약 요소 (선택)

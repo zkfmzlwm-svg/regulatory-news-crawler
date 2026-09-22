@@ -1,0 +1,33 @@
+# 체크(선택)한 기사에 대한 요약 서식 정의
+# 이 항목들을 자유롭게 수정하면 요약 결과물의 구성이 바뀝니다.
+# instruction 은 요약 생성 시 각 항목에 무엇을 채울지 알려주는 지침입니다.
+
+title: "해외 의약품 규제동향 요약"
+
+# 요약 결과 저장 형식: md(마크다운) | txt | docx
+output_format: "md"
+
+fields:
+  - key: "title_kr"
+    label: "제목(국문)"
+    instruction: "기사 제목을 자연스러운 한국어로 번역"
+
+  - key: "source_meta"
+    label: "출처/발행일/규제기관"
+    instruction: "매체명, 발행일, 관련 규제기관(FDA/EMA/MHRA 등)을 한 줄로 정리"
+
+  - key: "summary"
+    label: "핵심 요약"
+    instruction: "기사의 핵심 내용을 한국어 불릿 3~5개로 요약. 숫자/날짜/제품명 등 사실관계는 정확히 유지"
+
+  - key: "impact"
+    label: "국내 제약/규제 시사점"
+    instruction: "국내 제약회사 인허가, 임상, 품질관리(GMP), 시판 등에 미칠 수 있는 영향과 시사점을 2~3줄로 분석"
+
+  - key: "action_items"
+    label: "확인/대응 필요 사항"
+    instruction: "실무자가 추가로 확인하거나 대응해야 할 사항을 불릿으로 제시 (해당 없으면 '해당 없음')"
+
+  - key: "source_url"
+    label: "원문 링크"
+    instruction: "기사 원문 URL 그대로 표기"
