@@ -1,14 +1,15 @@
-import os
+import queue
+import shutil
+import threading
+import webbrowser
 from datetime import datetime
 from pathlib import Path
-
-import pandas as pd
-import streamlit as st
+from tkinter import BooleanVar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
+from tkinter.scrolledtext import ScrolledText
 
 from src.crawler import crawl_all, load_sources, save_sources
 from src.fetcher import fetch_full_text
 from src.storage import DEFAULT_DB_PATH, Storage
-from src.utils import clean_text
 from src.summarizer import (
     SummaryEntry,
     load_format,
@@ -17,232 +18,323 @@ from src.summarizer import (
     summarize_article,
     write_summaries,
 )
+from src.utils import clean_text
 
 BASE_DIR = Path(__file__).resolve().parent
 SOURCES_CONFIG = BASE_DIR / "config" / "sources.yaml"
 FORMAT_CONFIG = BASE_DIR / "config" / "summary_format.yaml"
 OUTPUT_DIR = BASE_DIR / "output"
 
-st.set_page_config(page_title="해외 의약품 규제 뉴스 크롤러", layout="wide")
-st.title("해외 의약품 규제 뉴스 크롤러")
 
+class App(Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("해외 의약품 규제 뉴스 크롤러")
+        self.geometry("1120x760")
+        self.minsize(900, 600)
 
-def _check_password() -> bool:
-    """st.secrets 에 APP_PASSWORD 가 설정된 경우에만 비밀번호를 요구.
+        self.store = Storage(DEFAULT_DB_PATH)
+        self.articles = []
+        self.selected_ids = set()
+        self.last_output_path = None
+        self.task_queue = queue.Queue()
 
-    배포(예: Streamlit Community Cloud)해서 링크가 외부에 노출되었을 때,
-    아무나 AI 요약(토큰 사용) 버튼을 눌러 API 비용이 나가는 것을 막기 위한 최소한의 보호장치.
-    """
-    try:
-        required = st.secrets.get("APP_PASSWORD")
-    except Exception:
-        required = None
-    if not required:
-        return True  # 비밀번호 미설정 (로컬 실행 등) 시 그냥 통과
+        self._build_ui()
+        self.refresh_list()
+        self.after(100, self._poll_queue)
 
-    if st.session_state.get("authenticated"):
-        return True
+    # ---------------- UI 구성 ----------------
+    def _build_ui(self):
+        toolbar = ttk.Frame(self, padding=8)
+        toolbar.pack(fill="x")
 
-    pw = st.text_input("접속 비밀번호", type="password")
-    if pw:
-        if pw == required:
-            st.session_state["authenticated"] = True
-            st.rerun()
+        self.crawl_btn = ttk.Button(toolbar, text="🔄 기사 수집", command=self.start_crawl)
+        self.crawl_btn.pack(side="left", padx=(0, 12))
+
+        ttk.Label(toolbar, text="키워드").pack(side="left")
+        self.keyword_var = StringVar()
+        keyword_entry = ttk.Entry(toolbar, textvariable=self.keyword_var, width=20)
+        keyword_entry.pack(side="left", padx=(4, 8))
+        keyword_entry.bind("<Return>", lambda e: self.refresh_list())
+
+        self.unchecked_only_var = BooleanVar()
+        ttk.Checkbutton(
+            toolbar,
+            text="요약 안 한 것만",
+            variable=self.unchecked_only_var,
+            command=self.refresh_list,
+        ).pack(side="left", padx=(0, 8))
+
+        ttk.Button(toolbar, text="검색", command=self.refresh_list).pack(side="left")
+        ttk.Button(toolbar, text="사이트 관리", command=self.open_source_manager).pack(side="right")
+
+        hint = ttk.Label(
+            self,
+            text="※ 표의 '선택' 칸을 클릭해 요약할 기사를 고르고, 제목을 더블클릭하면 원문이 브라우저로 열립니다.",
+            padding=(8, 0),
+            foreground="#555555",
+        )
+        hint.pack(fill="x")
+
+        list_frame = ttk.Frame(self, padding=8)
+        list_frame.pack(fill="both", expand=True)
+
+        columns = ("select", "date", "source", "title", "summarized")
+        self.tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="none")
+        headers = {"select": "선택", "date": "날짜", "source": "출처", "title": "제목", "summarized": "요약됨"}
+        widths = {"select": 50, "date": 90, "source": 130, "title": 600, "summarized": 60}
+        anchors = {"select": "center", "date": "center", "source": "w", "title": "w", "summarized": "center"}
+        for col in columns:
+            self.tree.heading(col, text=headers[col])
+            self.tree.column(col, width=widths[col], anchor=anchors[col])
+
+        vsb = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        self.tree.bind("<Button-1>", self._on_tree_click)
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
+
+        action_frame = ttk.Frame(self, padding=8)
+        action_frame.pack(fill="x")
+
+        self.selection_label = ttk.Label(action_frame, text="0건 표시 · 0건 선택됨")
+        self.selection_label.pack(side="left")
+
+        ttk.Button(
+            action_frame, text="🌍 번역 요약 (무료)", command=lambda: self.start_summarize("free")
+        ).pack(side="right", padx=4)
+        ttk.Button(
+            action_frame, text="🆓 단순 요약 (영어)", command=lambda: self.start_summarize("simple")
+        ).pack(side="right", padx=4)
+
+        result_frame = ttk.LabelFrame(self, text="요약 결과", padding=8)
+        result_frame.pack(fill="both", expand=False, padx=8, pady=(0, 8))
+        self.result_text = ScrolledText(result_frame, height=14, wrap="word", font=("맑은 고딕", 10))
+        self.result_text.pack(fill="both", expand=True)
+
+        save_row = ttk.Frame(result_frame)
+        save_row.pack(fill="x", pady=(6, 0))
+        ttk.Button(save_row, text="📁 다른 이름으로 저장", command=self.save_as).pack(side="left")
+
+        self.status_var = StringVar(value="준비됨")
+        ttk.Label(self, textvariable=self.status_var, anchor="w", padding=(8, 4)).pack(fill="x")
+
+    # ---------------- 기사 목록 ----------------
+    def refresh_list(self):
+        keyword = self.keyword_var.get().strip() or None
+        self.articles = self.store.list_articles(
+            keyword=keyword, unchecked_only=self.unchecked_only_var.get(), limit=300
+        )
+        self.selected_ids &= {a.id for a in self.articles}
+        self._render_tree()
+
+    def _render_tree(self):
+        self.tree.delete(*self.tree.get_children())
+        for a in self.articles:
+            mark = "☑" if a.id in self.selected_ids else "☐"
+            done = "✅" if a.summarized else ""
+            self.tree.insert(
+                "",
+                "end",
+                iid=str(a.id),
+                values=(mark, (a.published_at or "")[:10], a.tag or a.source, clean_text(a.title), done),
+            )
+        self.selection_label.config(text=f"{len(self.articles)}건 표시 · {len(self.selected_ids)}건 선택됨")
+
+    def _on_tree_click(self, event):
+        if self.tree.identify_region(event.x, event.y) != "cell":
+            return
+        if self.tree.identify_column(event.x) != "#1":
+            return
+        row_id = self.tree.identify_row(event.y)
+        if not row_id:
+            return
+        aid = int(row_id)
+        if aid in self.selected_ids:
+            self.selected_ids.discard(aid)
         else:
-            st.error("비밀번호가 올바르지 않습니다.")
-    return False
+            self.selected_ids.add(aid)
+        self._render_tree()
 
+    def _on_tree_double_click(self, event):
+        row_id = self.tree.identify_row(event.y)
+        if not row_id:
+            return
+        article = next((a for a in self.articles if a.id == int(row_id)), None)
+        if article:
+            webbrowser.open(article.url)
 
-if not _check_password():
-    st.stop()
+    # ---------------- 기사 수집 ----------------
+    def start_crawl(self):
+        self.crawl_btn.config(state="disabled", text="수집 중...")
+        self.status_var.set("등록된 사이트에서 기사를 가져오는 중...")
+        threading.Thread(target=self._crawl_worker, daemon=True).start()
 
-
-@st.cache_resource
-def get_storage() -> Storage:
-    return Storage(DEFAULT_DB_PATH)
-
-
-store = get_storage()
-
-# ---------------- 사이드바: 수집 / 필터 / 사이트 관리 ----------------
-with st.sidebar:
-    st.header("1. 기사 수집")
-    if st.button("🔄 기사 수집 실행", use_container_width=True):
-        sources = load_sources(str(SOURCES_CONFIG))
-        with st.spinner("등록된 사이트에서 기사를 가져오는 중..."):
+    def _crawl_worker(self):
+        try:
+            sources = load_sources(str(SOURCES_CONFIG))
             found = crawl_all(sources)
-            added = store.add_articles(found)
-        st.success(f"조회 {len(found)}건 · 신규 저장 {added}건")
+            added = self.store.add_articles(found)
+            self.task_queue.put(("crawl_done", (len(found), added)))
+        except Exception as exc:
+            self.task_queue.put(("crawl_error", str(exc)))
 
-    st.divider()
-    st.header("2. 목록 필터")
-    keyword = st.text_input("키워드 검색", placeholder="예: biosimilar")
-    all_sources = load_sources(str(SOURCES_CONFIG))
-    source_names = [s["name"] for s in all_sources]
-    selected_sources = st.multiselect("출처", source_names)
-    unchecked_only = st.checkbox("아직 요약 안 한 기사만 보기")
+    # ---------------- 요약 ----------------
+    def start_summarize(self, mode: str):
+        if not self.selected_ids:
+            messagebox.showinfo("알림", "표의 '선택' 칸을 클릭해 요약할 기사를 먼저 골라주세요.")
+            return
+        ids = list(self.selected_ids)
+        self.status_var.set("요약 준비 중...")
+        threading.Thread(target=self._summarize_worker, args=(ids, mode), daemon=True).start()
 
-    st.divider()
-    st.header("3. 수집 대상 사이트")
-    with st.expander(f"등록된 사이트 ({len(all_sources)}개)"):
-        for s in all_sources:
-            dot = "🟢" if s.get("enabled", True) else "⚪"
-            st.caption(f"{dot} [{s.get('tag', '')}] {s['name']}")
-
-    with st.expander("➕ 사이트 추가 (RSS)"):
-        with st.form("add_source_form", clear_on_submit=True):
-            new_name = st.text_input("사이트 이름")
-            new_url = st.text_input("RSS URL")
-            new_tag = st.text_input("태그 (예: FDA)")
-            if st.form_submit_button("추가") and new_name and new_url:
-                all_sources.append(
-                    {
-                        "name": new_name,
-                        "type": "rss",
-                        "url": new_url,
-                        "tag": new_tag or new_name,
-                        "region": "Custom",
-                        "enabled": True,
-                    }
-                )
-                save_sources(str(SOURCES_CONFIG), all_sources)
-                st.success("사이트를 추가했습니다.")
-                st.rerun()
-
-    st.divider()
-    st.header("4. 내 API 키 (선택)")
-    st.caption("이 브라우저 세션에서만 사용되고 파일에 저장되지 않습니다. 새로고침하면 다시 입력해야 합니다.")
-    user_api_key = st.text_input(
-        "내 Anthropic API 키",
-        type="password",
-        placeholder="sk-ant-...",
-        value=st.session_state.get("user_api_key", ""),
-        key="user_api_key_input",
-    )
-    st.session_state["user_api_key"] = user_api_key
-
-    effective_api_key = user_api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if user_api_key:
-        st.caption("✅ 내가 입력한 키로 AI 요약 사용 중")
-    elif os.environ.get("ANTHROPIC_API_KEY"):
-        st.caption("✅ 서버에 설정된 키로 AI 요약 사용 중")
-    else:
-        st.caption("⚠️ API 키 미설정 — 아래 '🌍 번역 요약 (무료)'로 API 키 없이도 한국어 번역 가능")
-
-# ---------------- 본문: 기사 목록 + 체크박스 선택 ----------------
-articles = store.list_articles(
-    keyword=keyword or None,
-    unchecked_only=unchecked_only,
-    limit=300,
-)
-if selected_sources:
-    articles = [a for a in articles if a.source in selected_sources]
-
-st.header("기사 목록")
-
-if not articles:
-    st.info("표시할 기사가 없습니다. 왼쪽에서 '기사 수집 실행'을 눌러주세요.")
-else:
-    df = pd.DataFrame(
-        [
-            {
-                "id": a.id,
-                "선택": False,
-                "날짜": (a.published_at or "")[:10],
-                "출처": a.tag or a.source,
-                "제목": clean_text(a.title),
-                "링크": a.url,
-                "요약됨": "✅" if a.summarized else "",
-            }
-            for a in articles
-        ]
-    )
-
-    edited = st.data_editor(
-        df,
-        hide_index=True,
-        use_container_width=True,
-        column_order=["선택", "날짜", "출처", "제목", "링크", "요약됨"],
-        column_config={
-            "선택": st.column_config.CheckboxColumn("선택", default=False),
-            "링크": st.column_config.LinkColumn("원문", display_text="열기"),
-        },
-        disabled=["날짜", "출처", "제목", "링크", "요약됨"],
-        key="article_editor",
-    )
-
-    selected_ids = edited.loc[edited["선택"], "id"].tolist()
-    st.caption(f"{len(articles)}건 표시 중 · {len(selected_ids)}건 선택됨")
-
-    def run_summarize(mode: str, spinner_label: str):
-        fmt = load_format(str(FORMAT_CONFIG))
-        selected_articles = store.get_by_ids(selected_ids)
-        entries = []
-        errors = []
-        progress = st.progress(0.0)
-        for i, a in enumerate(selected_articles, start=1):
-            with st.spinner(f"{spinner_label} ({i}/{len(selected_articles)}): [{a.tag or a.source}] {a.title}"):
+    def _summarize_worker(self, ids, mode):
+        try:
+            fmt = load_format(str(FORMAT_CONFIG))
+            selected_articles = self.store.get_by_ids(ids)
+            entries = []
+            total = len(selected_articles)
+            for i, a in enumerate(selected_articles, start=1):
+                self.task_queue.put(("progress", (i, total, a.title)))
                 full_text = fetch_full_text(a.url)
-                try:
-                    body = summarize_article(a, full_text, fmt, mode=mode, api_key=user_api_key or None)
-                except Exception as exc:
-                    errors.append(f"{a.title}: {exc}")
-                    body = f"- (요약 실패: {exc})"
+                body = summarize_article(a, full_text, mode=mode)
                 entries.append(SummaryEntry(index=i, article=a, body=body))
-            progress.progress(i / len(selected_articles))
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = str(OUTPUT_DIR / f"summary_{ts}.{output_extension(fmt)}")
-        write_summaries(fmt, entries, output_path)
-        store.set_summarized(selected_ids, True)
-        store.set_checked(selected_ids, False)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = str(OUTPUT_DIR / f"summary_{ts}.{output_extension(fmt)}")
+            write_summaries(fmt, entries, output_path)
+            self.store.set_summarized(ids, True)
+            self.store.set_checked(ids, False)
+            preview = render_txt(fmt, entries)
+            self.task_queue.put(("summarize_done", (preview, output_path, len(entries))))
+        except Exception as exc:
+            self.task_queue.put(("summarize_error", str(exc)))
 
-        st.session_state["last_summary_preview"] = render_txt(fmt, entries)
-        st.session_state["last_summary_path"] = output_path
-        if errors:
-            st.warning(f"{len(entries)}건 중 {len(errors)}건 요약 실패:\n" + "\n".join(errors))
-        else:
-            st.success(f"{len(entries)}건 요약 완료 → {output_path}")
-        st.rerun()
+    def save_as(self):
+        if not self.last_output_path or not Path(self.last_output_path).exists():
+            messagebox.showinfo("알림", "먼저 요약을 생성하세요.")
+            return
+        ext = Path(self.last_output_path).suffix
+        dest = filedialog.asksaveasfilename(
+            defaultextension=ext,
+            initialfile=Path(self.last_output_path).name,
+            filetypes=[("파일", f"*{ext}")],
+        )
+        if dest:
+            shutil.copyfile(self.last_output_path, dest)
+            messagebox.showinfo("저장 완료", f"저장했습니다:\n{dest}")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button(
-            "🆓 단순 요약 (영어)",
-            use_container_width=True,
-            disabled=not selected_ids,
-            help="번역 없이 원문 문장을 그대로 추출합니다. API 키 불필요.",
-        ):
-            run_summarize("simple", "단순 요약 중")
-    with col2:
-        if st.button(
-            "🌍 번역 요약 (무료)",
-            use_container_width=True,
-            disabled=not selected_ids,
-            help="Google 번역(비공식, 무료)으로 문장을 한국어로 번역합니다. API 키 불필요. "
-            "AI 요약만큼 매끄럽게 재구성되지는 않습니다.",
-        ):
-            run_summarize("free", "번역 요약 중")
-    with col3:
-        if st.button(
-            "🤖 AI 요약 (토큰 사용)",
-            type="primary",
-            use_container_width=True,
-            disabled=not selected_ids or not effective_api_key,
-            help=(
-                "Claude API로 한국어 번역·요약을 생성합니다 (기사당 토큰 소모)."
-                if effective_api_key
-                else "API 키가 없습니다. 왼쪽 사이드바 '4. 내 API 키'에 본인 키를 입력하세요."
-            ),
-        ):
-            run_summarize("ai", "AI 요약 생성 중")
+    # ---------------- 사이트 관리 ----------------
+    def open_source_manager(self):
+        SourceManagerDialog(self)
 
-if "last_summary_preview" in st.session_state:
-    st.divider()
-    st.header("요약 결과")
-    # 글머리 기호/글자 크기가 뒤죽박죽 보이지 않도록 마크다운 해석 없이 고정폭 텍스트로 표시
-    st.code(st.session_state["last_summary_preview"], language=None)
-    path = st.session_state["last_summary_path"]
-    if Path(path).exists():
-        with open(path, "rb") as f:
-            st.download_button("📥 파일 다운로드", f, file_name=Path(path).name, use_container_width=True)
+    # ---------------- 백그라운드 작업 결과 처리 ----------------
+    def _poll_queue(self):
+        try:
+            while True:
+                kind, payload = self.task_queue.get_nowait()
+                self._handle_task_result(kind, payload)
+        except queue.Empty:
+            pass
+        self.after(100, self._poll_queue)
+
+    def _handle_task_result(self, kind, payload):
+        if kind == "crawl_done":
+            found, added = payload
+            self.crawl_btn.config(state="normal", text="🔄 기사 수집")
+            self.status_var.set(f"수집 완료: 조회 {found}건 · 신규 저장 {added}건")
+            self.refresh_list()
+        elif kind == "crawl_error":
+            self.crawl_btn.config(state="normal", text="🔄 기사 수집")
+            self.status_var.set("수집 실패")
+            messagebox.showerror("수집 실패", payload)
+        elif kind == "progress":
+            i, total, title = payload
+            self.status_var.set(f"요약 중 ({i}/{total}): {title}")
+        elif kind == "summarize_done":
+            preview, output_path, n = payload
+            self.status_var.set(f"요약 완료: {n}건 → {output_path}")
+            self.last_output_path = output_path
+            self.result_text.delete("1.0", "end")
+            self.result_text.insert("1.0", preview)
+            self.selected_ids.clear()
+            self.refresh_list()
+        elif kind == "summarize_error":
+            self.status_var.set("요약 실패")
+            messagebox.showerror("요약 실패", payload)
+
+
+class SourceManagerDialog(Toplevel):
+    """수집 대상 RSS 사이트 목록 확인 및 추가 창."""
+
+    def __init__(self, parent: App):
+        super().__init__(parent)
+        self.title("수집 대상 사이트 관리")
+        self.geometry("680x440")
+        self.transient(parent)
+
+        list_frame = ttk.Frame(self, padding=8)
+        list_frame.pack(fill="both", expand=True)
+        self.listbox = ttk.Treeview(list_frame, columns=("tag", "name", "url"), show="headings")
+        self.listbox.heading("tag", text="태그")
+        self.listbox.heading("name", text="이름")
+        self.listbox.heading("url", text="URL")
+        self.listbox.column("tag", width=90)
+        self.listbox.column("name", width=200)
+        self.listbox.column("url", width=340)
+        self.listbox.pack(fill="both", expand=True)
+        self._load_sources()
+
+        form = ttk.LabelFrame(self, text="RSS 사이트 추가", padding=8)
+        form.pack(fill="x", padx=8, pady=8)
+        form.columnconfigure(1, weight=1)
+
+        self.name_var = StringVar()
+        self.url_var = StringVar()
+        self.tag_var = StringVar()
+
+        ttk.Label(form, text="이름").grid(row=0, column=0, sticky="w")
+        ttk.Entry(form, textvariable=self.name_var).grid(row=0, column=1, padx=4, sticky="we")
+        ttk.Label(form, text="태그").grid(row=0, column=2, sticky="w")
+        ttk.Entry(form, textvariable=self.tag_var, width=12).grid(row=0, column=3, padx=4)
+
+        ttk.Label(form, text="RSS URL").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Entry(form, textvariable=self.url_var).grid(
+            row=1, column=1, columnspan=3, padx=4, pady=(4, 0), sticky="we"
+        )
+
+        ttk.Button(form, text="추가", command=self.add_source).grid(row=2, column=3, sticky="e", pady=(8, 0))
+
+    def _load_sources(self):
+        self.listbox.delete(*self.listbox.get_children())
+        self.sources = load_sources(str(SOURCES_CONFIG))
+        for s in self.sources:
+            self.listbox.insert("", "end", values=(s.get("tag", ""), s["name"], s["url"]))
+
+    def add_source(self):
+        name = self.name_var.get().strip()
+        url = self.url_var.get().strip()
+        tag = self.tag_var.get().strip() or name
+        if not name or not url:
+            messagebox.showwarning("입력 필요", "이름과 URL을 입력하세요.", parent=self)
+            return
+        self.sources.append(
+            {"name": name, "type": "rss", "url": url, "tag": tag, "region": "Custom", "enabled": True}
+        )
+        save_sources(str(SOURCES_CONFIG), self.sources)
+        self.name_var.set("")
+        self.url_var.set("")
+        self.tag_var.set("")
+        self._load_sources()
+        messagebox.showinfo("완료", f"'{name}' 사이트를 추가했습니다.", parent=self)
+
+
+def main():
+    app = App()
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    main()

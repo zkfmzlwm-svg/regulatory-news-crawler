@@ -134,7 +134,7 @@ def cmd_summarize(args):
     for i, a in enumerate(articles, start=1):
         print(f"요약 중: [{a.tag or a.source}] {a.title}")
         full_text = fetch_full_text(a.url)
-        body = summarize_article(a, full_text, fmt, mode=args.mode)
+        body = summarize_article(a, full_text, mode=args.mode)
         entries.append(SummaryEntry(index=i, article=a, body=body))
 
     if args.output:
@@ -205,12 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_summarize.add_argument(
         "--mode",
-        choices=["auto", "simple", "free", "ai"],
-        default="auto",
-        help=(
-            "simple=토큰/키 없이 원문 추출, free=API 키 없이 무료 번역(Google), "
-            "ai=Claude 요약(토큰 사용), auto=API 키 유무로 자동 선택(기본값)"
-        ),
+        choices=["free", "simple"],
+        default="free",
+        help="free=무료 번역(Google, 기본값), simple=번역 없이 원문 문장만 추출",
     )
     p_summarize.set_defaults(func=cmd_summarize)
 

@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,15 +11,11 @@ from .utils import clean_text, strip_tags
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
-
 
 @dataclass
 class SummaryFormat:
     title: str
     output_format: str
-    style_example: str
-    instruction: str
 
 
 @dataclass
@@ -45,57 +40,7 @@ def load_format(config_path: str) -> SummaryFormat:
     return SummaryFormat(
         title=data.get("title", "규제동향 요약"),
         output_format=data.get("output_format", "md"),
-        style_example=data.get("style_example", ""),
-        instruction=data.get("instruction", ""),
     )
-
-
-def _summarize_with_claude(
-    article: Article, full_text: Optional[str], fmt: SummaryFormat, api_key: Optional[str] = None
-) -> str:
-    from anthropic import Anthropic
-
-    # api_key가 주어지면 그 키를 쓰고, 없으면 SDK가 ANTHROPIC_API_KEY 환경변수를 읽음
-    client = Anthropic(api_key=api_key) if api_key else Anthropic()
-
-    body = full_text or article.excerpt or "(본문을 가져오지 못했습니다. 제목과 출처 정보만으로 작성)"
-    body = body[:12000]  # keep prompt size reasonable
-
-    prompt = f"""다음은 해외 의약품 규제 관련 뉴스 기사입니다.
-
-제목: {article.title}
-출처: {article.source}
-발행일: {article.published_at or "미상"}
-URL: {article.url}
-
-본문:
-{body}
-
----
-아래는 원하는 요약 서식의 예시입니다 (번호/[태그]/제목/링크 줄은 프로그램이 자동으로 채우므로 무시하고,
-본문 불릿의 형식만 참고하세요):
-
-{fmt.style_example}
----
-
-지침:
-{fmt.instruction}
-
-위 기사 본문을 분석해서 예시의 본문 불릿과 동일한 형식으로만 출력하세요.
-- 반드시 한국어로 작성하세요 (원문이 영어여도 한국어로 번역/요약)
-- "- "로 시작하는 불릿, 필요하면 "  : "로 들여쓴 세부 항목으로 구성
-- 불릿 개수는 내용에 맞게 3~6개 정도
-- 번호, 제목 줄, 링크 줄은 포함하지 말고 본문 불릿만 출력
-- 다른 설명 문구 없이 본문 불릿만 출력하세요
-"""
-
-    resp = client.messages.create(
-        model=DEFAULT_MODEL,
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = "".join(block.text for block in resp.content if getattr(block, "type", "") == "text")
-    return strip_tags(text.strip())
 
 
 def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
@@ -139,43 +84,16 @@ def _summarize_free_translate(article: Article, full_text: Optional[str]) -> str
     return "\n".join(lines)
 
 
-def summarize_article(
-    article: Article,
-    full_text: Optional[str],
-    fmt: SummaryFormat,
-    mode: str = "auto",
-    api_key: Optional[str] = None,
-) -> str:
-    """체크한 기사 본문을 요약해 body(불릿 텍스트)를 반환.
+def summarize_article(article: Article, full_text: Optional[str], mode: str = "free") -> str:
+    """체크한 기사 본문을 요약해 body(불릿 텍스트)를 반환. API 키 불필요.
 
     mode:
-      - "simple": 토큰을 쓰지 않는 단순 추출 요약 (번역 없음, 무료, API 키 불필요)
-      - "free": Google 번역(비공식, 무료)으로 문장을 한국어로 번역 (API 키 불필요)
-      - "ai": Claude API로 번역/요약 (토큰 사용). 키가 없으면 예외 발생
-      - "auto": 키가 있으면 ai, 없으면 simple로 자동 대체 (기존 동작)
-
-    api_key: 명시적으로 지정하면 이 키를 사용 (예: 화면에서 개인 키를 입력한 경우).
-             지정하지 않으면 ANTHROPIC_API_KEY 환경변수를 사용.
+      - "simple": 번역 없이 원문 문장을 그대로 추출
+      - "free": Google 번역(비공식, 무료)으로 문장을 한국어로 번역
     """
-    effective_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-
     if mode == "simple":
         return _summarize_fallback(article, full_text)
-
-    if mode == "free":
-        return _summarize_free_translate(article, full_text)
-
-    if mode == "ai":
-        if not effective_key:
-            raise RuntimeError("API 키가 설정되어 있지 않아 AI 요약을 사용할 수 없습니다.")
-        return _summarize_with_claude(article, full_text, fmt, api_key=api_key)
-
-    if effective_key:
-        try:
-            return _summarize_with_claude(article, full_text, fmt, api_key=api_key)
-        except Exception as exc:
-            logger.warning("Claude 요약 실패, 단순 요약으로 대체 (%s): %s", article.title, exc)
-    return _summarize_fallback(article, full_text)
+    return _summarize_free_translate(article, full_text)
 
 
 def render_markdown(fmt: SummaryFormat, entries: List[SummaryEntry]) -> str:

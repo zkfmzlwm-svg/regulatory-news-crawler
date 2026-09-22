@@ -1,31 +1,12 @@
-# 체크(선택)한 기사에 대한 요약 서식 정의
+# 요약 결과 서식 설정
 #
-# style_example 을 실제 원하는 서식의 예시로 두면, 요약할 때 이 형식을 그대로 따라갑니다.
-# 서식을 바꾸고 싶으면 style_example 을 원하는 예시로 교체하세요.
-# {n}(번호), [{tag}](출처 태그), 제목(원문 영문 그대로), 링크 줄은 프로그램이 자동으로 채우고,
-# 본문 불릿만 instruction 지침에 따라 AI가 한국어로 번역/요약해 작성합니다.
+# 각 기사는 다음 형태로 출력됩니다 (번호/[태그]/제목/링크 줄은 프로그램이 자동으로 채움):
+#
+# 1. [FDA] FDA Approves New Generic Drug Pathway Rule
+# - 번역되거나 추출된 문장 불릿...
+# - 링크: [원문 제목 | 태그](URL)
 
 title: "해외 의약품 규제동향 요약"
 
 # 요약 결과 저장 형식: md(마크다운) | txt | docx
 output_format: "md"
-
-style_example: |
-  1. [FDA] Form 483 Observation 의 답변 Guideline 초안 발표
-  - 기업들이 Form 483 답변서가 데이터 누락, 구조적 결함, 근본 원인 분석 미흡 등 '부적절'한 경우가 많았음
-  - 핵심 권장사항
-    : 구조적이고 리스크 기반(Risk-based) 접근 방식을 취해야 함
-    : 단순 수정이 아닌 근본 원인(Root Cause) 을 파악하고 최종 사용자에게 미칠 영향을 평가해야 함
-    : 적절한 CAPA 를 구현해야 함
-  - 제출 Format, 중간 보고서 작성, 과학적/기술적 이견이 있을 때의 처리 방법 등도 언급
-  - 5월 8일까지 초안에 대한 의견 수렴 중
-  - 링크: [Responding to FDA Form 483 Observations at the Conclusion of a Drug CGMP Inspection | FDA](https://www.fda.gov/regulatory-information/search-fda-guidance-documents/responding-fda-form-483-observations-conclusion-drug-cgmp-inspection)
-
-instruction: |
-  위 style_example 의 본문 불릿과 완전히 동일한 형식으로 기사 본문을 요약하라.
-  - 반드시 한국어로 작성 (원문이 영어여도 번역해서 작성)
-  - "- " 불릿으로 핵심 내용을 정리하고, 세부 항목이 있으면 "  : " 로 한 단계 들여쓰기
-  - 불릿 개수는 내용에 맞게 자유롭게 조절하되 보통 3~6개
-  - 발표 배경/핵심 내용, 세부 권고사항, 적용 범위, 일정(의견수렴 마감일 등 있으면) 순으로 정리
-  - 날짜, 숫자, 제품명, 기관명 등 사실관계는 원문 기준으로 정확히 작성 (추측 금지)
-  - 번호, 제목, 링크 줄은 프로그램이 자동으로 채우므로 본문 불릿만 작성
