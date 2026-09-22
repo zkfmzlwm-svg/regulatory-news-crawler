@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 
 from .models import Article
+from .utils import clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def crawl_rss(source: Dict) -> List[Article]:
         return articles
 
     for entry in feed.entries:
-        title = getattr(entry, "title", "").strip()
+        title = clean_text(getattr(entry, "title", ""))
         link = getattr(entry, "link", "").strip()
         if not title or not link:
             continue
@@ -73,8 +74,7 @@ def crawl_rss(source: Dict) -> List[Article]:
             getattr(entry, "published_parsed", None) or getattr(entry, "published", None)
             or getattr(entry, "updated_parsed", None) or getattr(entry, "updated", None)
         )
-        excerpt = getattr(entry, "summary", "") or ""
-        excerpt = BeautifulSoup(excerpt, "lxml").get_text(" ", strip=True)[:500]
+        excerpt = clean_text(getattr(entry, "summary", ""))[:500]
         articles.append(
             Article(
                 source=name,
@@ -118,7 +118,7 @@ def crawl_html(source: Dict) -> List[Article]:
         title_el = item.select_one(title_sel)
         if not title_el:
             continue
-        title = title_el.get_text(" ", strip=True)
+        title = clean_text(title_el.get_text(" ", strip=True))
 
         link_el = item.select_one(link_sel) if link_sel else title_el
         href = link_el.get("href") if link_el else None
@@ -136,7 +136,7 @@ def crawl_html(source: Dict) -> List[Article]:
         if summary_sel:
             summary_el = item.select_one(summary_sel)
             if summary_el:
-                excerpt = summary_el.get_text(" ", strip=True)[:500]
+                excerpt = clean_text(summary_el.get_text(" ", strip=True))[:500]
 
         if not title:
             continue

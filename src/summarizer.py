@@ -1,14 +1,14 @@
-import json
 import logging
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import yaml
 
 from .models import Article
+from .utils import clean_text, strip_tags
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +27,16 @@ class SummaryFormat:
 class SummaryEntry:
     index: int
     article: Article
-    title_kr: str
     body: str
 
     @property
     def tag(self) -> str:
         return self.article.tag or self.article.source
+
+    @property
+    def title(self) -> str:
+        """요약 제목 줄에 쓰는 원문(영문) 제목. 번역하지 않고 그대로 사용."""
+        return clean_text(self.article.title)
 
 
 def load_format(config_path: str) -> SummaryFormat:
@@ -46,23 +50,7 @@ def load_format(config_path: str) -> SummaryFormat:
     )
 
 
-def _extract_json(text: str) -> Optional[dict]:
-    text = text.strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if fence:
-        text = fence.group(1)
-    else:
-        brace = re.search(r"\{.*\}", text, re.DOTALL)
-        if brace:
-            text = brace.group(0)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        logger.warning("요약 결과 JSON 파싱 실패")
-        return None
-
-
-def _summarize_with_claude(article: Article, full_text: Optional[str], fmt: SummaryFormat) -> Tuple[str, str]:
+def _summarize_with_claude(article: Article, full_text: Optional[str], fmt: SummaryFormat) -> str:
     from anthropic import Anthropic
 
     client = Anthropic()  # reads ANTHROPIC_API_KEY from env
@@ -81,8 +69,8 @@ URL: {article.url}
 {body}
 
 ---
-아래는 원하는 요약 서식의 예시입니다 (번호/[태그]/링크 줄은 프로그램이 자동 생성하므로 무시하고,
-제목 문구와 본문 불릿 형식만 참고하세요):
+아래는 원하는 요약 서식의 예시입니다 (번호/[태그]/제목/링크 줄은 프로그램이 자동으로 채우므로 무시하고,
+본문 불릿의 형식만 참고하세요):
 
 {fmt.style_example}
 ---
@@ -90,10 +78,12 @@ URL: {article.url}
 지침:
 {fmt.instruction}
 
-위 기사를 지침과 예시 형식에 맞춰 요약해서, 아래 두 항목만 담은 JSON 객체 하나로 출력하세요.
-다른 설명 문구 없이 JSON만 출력하세요.
-- "title_kr": 예시의 제목 줄처럼 핵심을 담은 한글 제목 (번호/태그 없이 제목 문구만)
-- "body": 예시의 본문 불릿처럼 "- "로 시작하는 불릿과 필요시 "  : "로 들여쓴 세부 항목으로 구성된 문자열 (줄바꿈은 \\n 사용, 링크 줄은 포함하지 않음)
+위 기사 본문을 분석해서 예시의 본문 불릿과 동일한 형식으로만 출력하세요.
+- 반드시 한국어로 작성하세요 (원문이 영어여도 한국어로 번역/요약)
+- "- "로 시작하는 불릿, 필요하면 "  : "로 들여쓴 세부 항목으로 구성
+- 불릿 개수는 내용에 맞게 3~6개 정도
+- 번호, 제목 줄, 링크 줄은 포함하지 말고 본문 불릿만 출력
+- 다른 설명 문구 없이 본문 불릿만 출력하세요
 """
 
     resp = client.messages.create(
@@ -102,23 +92,19 @@ URL: {article.url}
         messages=[{"role": "user", "content": prompt}],
     )
     text = "".join(block.text for block in resp.content if getattr(block, "type", "") == "text")
-    parsed = _extract_json(text)
-    if parsed is None:
-        return article.title, text.strip()
-    return str(parsed.get("title_kr", article.title)).strip(), str(parsed.get("body", "")).strip()
+    return strip_tags(text.strip())
 
 
-def _summarize_fallback(article: Article, full_text: Optional[str]) -> Tuple[str, str]:
-    """ANTHROPIC_API_KEY가 없을 때 사용하는 단순 추출 요약 (번역/구조화 없음)."""
-    text = (full_text or article.excerpt or "").strip()
+def _summarize_fallback(article: Article, full_text: Optional[str]) -> str:
+    """ANTHROPIC_API_KEY가 없을 때 사용하는 단순 추출 요약 (번역 없이 원문 문장 그대로)."""
+    text = strip_tags(full_text or article.excerpt or "").strip()
     sentences = re.split(r"(?<=[.!?])\s+", text)
     bullets = [s.strip() for s in sentences if s.strip()][:5]
-    body = "\n".join(f"- {s}" for s in bullets) if bullets else "- (본문을 가져오지 못했습니다)"
-    return article.title, body
+    return "\n".join(f"- {s}" for s in bullets) if bullets else "- (본문을 가져오지 못했습니다)"
 
 
-def summarize_article(article: Article, full_text: Optional[str], fmt: SummaryFormat) -> Tuple[str, str]:
-    """Returns (title_kr, body) for one article."""
+def summarize_article(article: Article, full_text: Optional[str], fmt: SummaryFormat) -> str:
+    """체크한 기사 본문을 요약해 body(불릿 텍스트)를 반환."""
     if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             return _summarize_with_claude(article, full_text, fmt)
@@ -130,10 +116,10 @@ def summarize_article(article: Article, full_text: Optional[str], fmt: SummaryFo
 def render_markdown(fmt: SummaryFormat, entries: List[SummaryEntry]) -> str:
     lines = [f"# {fmt.title}", ""]
     for e in entries:
-        lines.append(f"{e.index}. [{e.tag}] {e.title_kr}")
+        lines.append(f"{e.index}. [{e.tag}] {e.title}")
         if e.body:
             lines.append(e.body)
-        lines.append(f"- 링크: [{e.article.title} | {e.tag}]({e.article.url})")
+        lines.append(f"- 링크: [{e.title} | {e.tag}]({e.article.url})")
         lines.append("")
     return "\n".join(lines)
 
@@ -141,10 +127,10 @@ def render_markdown(fmt: SummaryFormat, entries: List[SummaryEntry]) -> str:
 def render_txt(fmt: SummaryFormat, entries: List[SummaryEntry]) -> str:
     lines = [fmt.title, "=" * len(fmt.title), ""]
     for e in entries:
-        lines.append(f"{e.index}. [{e.tag}] {e.title_kr}")
+        lines.append(f"{e.index}. [{e.tag}] {e.title}")
         if e.body:
             lines.append(e.body)
-        lines.append(f"- 링크: {e.article.title} ({e.tag}) - {e.article.url}")
+        lines.append(f"- 링크: {e.title} ({e.tag}) - {e.article.url}")
         lines.append("")
     return "\n".join(lines)
 
@@ -179,11 +165,17 @@ def _add_hyperlink(paragraph, url: str, text: str):
 
 def render_docx(fmt: SummaryFormat, entries: List[SummaryEntry], output_path: str) -> None:
     from docx import Document
+    from docx.shared import Pt
 
     doc = Document()
+    doc.styles["Normal"].font.size = Pt(11)
+    for style_name in ("List Bullet", "List Bullet 2"):
+        if style_name in doc.styles:
+            doc.styles[style_name].font.size = Pt(11)
+
     doc.add_heading(fmt.title, level=1)
     for e in entries:
-        doc.add_heading(f"{e.index}. [{e.tag}] {e.title_kr}", level=2)
+        doc.add_heading(f"{e.index}. [{e.tag}] {e.title}", level=2)
         for line in e.body.splitlines():
             stripped = line.strip()
             if not stripped:
@@ -193,13 +185,13 @@ def render_docx(fmt: SummaryFormat, entries: List[SummaryEntry], output_path: st
             elif stripped.startswith("- "):
                 doc.add_paragraph(stripped[2:], style="List Bullet")
             else:
-                doc.add_paragraph(stripped)
+                doc.add_paragraph(stripped, style="List Bullet")
         link_p = doc.add_paragraph()
         link_p.add_run("링크: ")
         try:
-            _add_hyperlink(link_p, e.article.url, f"{e.article.title} | {e.tag}")
+            _add_hyperlink(link_p, e.article.url, f"{e.title} | {e.tag}")
         except Exception:
-            link_p.add_run(f"{e.article.title} | {e.tag} ({e.article.url})")
+            link_p.add_run(f"{e.title} | {e.tag} ({e.article.url})")
     doc.save(output_path)
 
 

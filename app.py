@@ -8,11 +8,12 @@ import streamlit as st
 from src.crawler import crawl_all, load_sources, save_sources
 from src.fetcher import fetch_full_text
 from src.storage import DEFAULT_DB_PATH, Storage
+from src.utils import clean_text
 from src.summarizer import (
     SummaryEntry,
     load_format,
     output_extension,
-    render_markdown,
+    render_txt,
     summarize_article,
     write_summaries,
 )
@@ -106,7 +107,7 @@ else:
                 "선택": False,
                 "날짜": (a.published_at or "")[:10],
                 "출처": a.tag or a.source,
-                "제목": a.title,
+                "제목": clean_text(a.title),
                 "링크": a.url,
                 "요약됨": "✅" if a.summarized else "",
             }
@@ -138,8 +139,8 @@ else:
         for i, a in enumerate(selected_articles, start=1):
             with st.spinner(f"요약 중 ({i}/{len(selected_articles)}): [{a.tag or a.source}] {a.title}"):
                 full_text = fetch_full_text(a.url)
-                title_kr, body = summarize_article(a, full_text, fmt)
-                entries.append(SummaryEntry(index=i, article=a, title_kr=title_kr, body=body))
+                body = summarize_article(a, full_text, fmt)
+                entries.append(SummaryEntry(index=i, article=a, body=body))
             progress.progress(i / len(selected_articles))
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -148,15 +149,16 @@ else:
         store.set_summarized(selected_ids, True)
         store.set_checked(selected_ids, False)
 
-        st.session_state["last_summary_md"] = render_markdown(fmt, entries)
+        st.session_state["last_summary_preview"] = render_txt(fmt, entries)
         st.session_state["last_summary_path"] = output_path
         st.success(f"{len(entries)}건 요약 완료 → {output_path}")
         st.rerun()
 
-if "last_summary_md" in st.session_state:
+if "last_summary_preview" in st.session_state:
     st.divider()
     st.header("요약 결과")
-    st.markdown(st.session_state["last_summary_md"])
+    # 글머리 기호/글자 크기가 뒤죽박죽 보이지 않도록 마크다운 해석 없이 고정폭 텍스트로 표시
+    st.code(st.session_state["last_summary_preview"], language=None)
     path = st.session_state["last_summary_path"]
     if Path(path).exists():
         with open(path, "rb") as f:

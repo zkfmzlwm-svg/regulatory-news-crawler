@@ -10,6 +10,7 @@ from .fetcher import fetch_full_text
 from .models import Article
 from .storage import DEFAULT_DB_PATH, Storage
 from .summarizer import SummaryEntry, load_format, output_extension, summarize_article, write_summaries
+from .utils import clean_text
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCES_CONFIG = BASE_DIR / "config" / "sources.yaml"
@@ -24,7 +25,7 @@ def _fmt_row(a: Article) -> str:
     check_mark = "[x]" if a.checked else "[ ]"
     sum_mark = "(요약됨)" if a.summarized else ""
     date = (a.published_at or "")[:10]
-    return f"{check_mark} #{a.id:<4} {date:<10} {a.source:<32} {a.title} {sum_mark}"
+    return f"{check_mark} #{a.id:<4} {date:<10} {a.source:<32} {clean_text(a.title)} {sum_mark}"
 
 
 def cmd_crawl(args):
@@ -133,8 +134,8 @@ def cmd_summarize(args):
     for i, a in enumerate(articles, start=1):
         print(f"요약 중: [{a.tag or a.source}] {a.title}")
         full_text = fetch_full_text(a.url)
-        title_kr, body = summarize_article(a, full_text, fmt)
-        entries.append(SummaryEntry(index=i, article=a, title_kr=title_kr, body=body))
+        body = summarize_article(a, full_text, fmt)
+        entries.append(SummaryEntry(index=i, article=a, body=body))
 
     if args.output:
         output_path = args.output
