@@ -127,7 +127,7 @@ with st.sidebar:
     elif os.environ.get("ANTHROPIC_API_KEY"):
         st.caption("✅ 서버에 설정된 키로 AI 요약 사용 중")
     else:
-        st.caption("⚠️ API 키 미설정 — 위에 내 키를 입력하거나, 단순 추출 요약만 사용 가능")
+        st.caption("⚠️ API 키 미설정 — 아래 '🌍 번역 요약 (무료)'로 API 키 없이도 한국어 번역 가능")
 
 # ---------------- 본문: 기사 목록 + 체크박스 선택 ----------------
 articles = store.list_articles(
@@ -205,18 +205,27 @@ else:
             st.success(f"{len(entries)}건 요약 완료 → {output_path}")
         st.rerun()
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button(
-            "🆓 단순 요약 (토큰 미사용)",
+            "🆓 단순 요약 (영어)",
             use_container_width=True,
             disabled=not selected_ids,
-            help="번역 없이 원문 문장을 그대로 추출합니다. 내용을 먼저 확인할 때 사용하세요.",
+            help="번역 없이 원문 문장을 그대로 추출합니다. API 키 불필요.",
         ):
             run_summarize("simple", "단순 요약 중")
     with col2:
         if st.button(
-            "🤖 AI 요약 생성 (토큰 사용)",
+            "🌍 번역 요약 (무료)",
+            use_container_width=True,
+            disabled=not selected_ids,
+            help="Google 번역(비공식, 무료)으로 문장을 한국어로 번역합니다. API 키 불필요. "
+            "AI 요약만큼 매끄럽게 재구성되지는 않습니다.",
+        ):
+            run_summarize("free", "번역 요약 중")
+    with col3:
+        if st.button(
+            "🤖 AI 요약 (토큰 사용)",
             type="primary",
             use_container_width=True,
             disabled=not selected_ids or not effective_api_key,

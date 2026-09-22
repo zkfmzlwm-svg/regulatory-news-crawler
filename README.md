@@ -26,10 +26,13 @@ streamlit run app.py
 - 왼쪽 사이드바: "🔄 기사 수집 실행" 버튼, 키워드/출처 필터, 사이트 추가
 - 사이드바 "4. 내 API 키" — 서버에 `ANTHROPIC_API_KEY`가 설정되어 있지 않아도, 본인 Anthropic API 키를 여기 직접 입력하면 AI 요약을 쓸 수 있습니다. 이 키는 **브라우저 세션에만 저장**되고 파일/서버에 저장되지 않으며, 그 키로 요청한 토큰은 그 키 소유자(본인) 계정으로 과금됩니다. 새로고침하면 다시 입력해야 합니다.
 - 본문 표: 기사별 **체크박스**로 원하는 기사 선택
-- 요약 버튼 두 가지:
-  - **🆓 단순 요약 (토큰 미사용)** — 번역 없이 원문 문장을 그대로 추출. 내용을 먼저 훑어볼 때 사용 (무료)
-  - **🤖 AI 요약 생성 (토큰 사용)** — Claude API로 한국어 번역/요약. 서버 환경변수 `ANTHROPIC_API_KEY` 또는 사이드바에 입력한 개인 키가 있어야 활성화됨 (기사당 토큰 소모)
+- 요약 버튼 세 가지:
+  - **🆓 단순 요약 (영어)** — 번역 없이 원문 문장을 그대로 추출. API 키 불필요, 완전 무료
+  - **🌍 번역 요약 (무료)** — Google 번역(비공식)으로 문장을 한국어로 번역. **API 키/토큰 전혀 필요 없음.** AI처럼 내용을 재구성하지는 않고 문장 단위로만 번역
+  - **🤖 AI 요약 (토큰 사용)** — Claude API로 한국어 번역과 함께 내용을 요약/재구성. 서버 환경변수 `ANTHROPIC_API_KEY` 또는 사이드바에 입력한 개인 키가 있어야 활성화됨 (기사당 토큰 소모)
 - 요약 결과가 화면에 바로 표시되고, 파일(md/txt/docx)로 다운로드 가능
+
+**API 키 없이 한국어로 보고 싶다면 "🌍 번역 요약 (무료)"를 쓰세요.** 번역 품질은 AI 요약보다 단순하지만(문장을 그대로 번역만 함, 불릿 재구성 없음) 비용이 전혀 들지 않습니다.
 
 ## 터미널(CLI)로 사용하기
 
@@ -46,7 +49,8 @@ python main.py check 1,3,5-8
 
 # 4) 체크된 기사 요약 생성 (config/summary_format.yaml 서식 적용)
 python main.py summarize                 # auto: API 키 있으면 AI, 없으면 단순 요약
-python main.py summarize --mode simple    # 토큰 미사용, 번역 없는 단순 요약
+python main.py summarize --mode simple    # 토큰/키 없이 번역 없는 단순 요약
+python main.py summarize --mode free      # API 키 없이 무료 번역(Google)으로 한국어 요약
 python main.py summarize --mode ai        # Claude 요약 강제 (토큰 사용, 키 없으면 에러)
 # 특정 파일로 저장
 python main.py summarize --output output/my_summary.md

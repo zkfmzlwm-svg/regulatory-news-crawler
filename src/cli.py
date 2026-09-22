@@ -205,9 +205,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_summarize.add_argument(
         "--mode",
-        choices=["auto", "simple", "ai"],
+        choices=["auto", "simple", "free", "ai"],
         default="auto",
-        help="simple=토큰 미사용 단순 요약, ai=Claude 요약(토큰 사용), auto=API 키 유무로 자동 선택(기본값)",
+        help=(
+            "simple=토큰/키 없이 원문 추출, free=API 키 없이 무료 번역(Google), "
+            "ai=Claude 요약(토큰 사용), auto=API 키 유무로 자동 선택(기본값)"
+        ),
     )
     p_summarize.set_defaults(func=cmd_summarize)
 

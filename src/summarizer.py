@@ -98,12 +98,45 @@ URL: {article.url}
     return strip_tags(text.strip())
 
 
-def _summarize_fallback(article: Article, full_text: Optional[str]) -> str:
-    """ANTHROPIC_API_KEY가 없을 때 사용하는 단순 추출 요약 (번역 없이 원문 문장 그대로)."""
+def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
     text = strip_tags(full_text or article.excerpt or "").strip()
     sentences = re.split(r"(?<=[.!?])\s+", text)
-    bullets = [s.strip() for s in sentences if s.strip()][:5]
+    return [s.strip() for s in sentences if s.strip()][:5]
+
+
+def _summarize_fallback(article: Article, full_text: Optional[str]) -> str:
+    """API 키가 없을 때 쓰는 가장 단순한 추출 요약 (번역 없이 원문 문장 그대로)."""
+    bullets = _extract_sentences(article, full_text)
     return "\n".join(f"- {s}" for s in bullets) if bullets else "- (본문을 가져오지 못했습니다)"
+
+
+def _summarize_free_translate(article: Article, full_text: Optional[str]) -> str:
+    """Anthropic API 키 없이 Google 번역(비공식, 무료)으로 원문 문장을 한국어로 옮긴 요약.
+
+    실제 AI 요약처럼 내용을 재구성/분석하지는 않고 추출한 문장을 그대로 번역만 하므로
+    품질은 AI 요약보다 단순하지만, 번역된 한국어 결과를 얻는 데 비용이 들지 않는다.
+    """
+    bullets = _extract_sentences(article, full_text)
+    if not bullets:
+        return "- (본문을 가져오지 못했습니다)"
+
+    try:
+        from deep_translator import GoogleTranslator
+
+        translator = GoogleTranslator(source="auto", target="ko")
+    except Exception as exc:
+        logger.warning("번역 모듈 로드 실패, 원문으로 대체: %s", exc)
+        return "\n".join(f"- {s}" for s in bullets)
+
+    lines = []
+    for s in bullets:
+        try:
+            translated = translator.translate(s)
+            lines.append(f"- {translated or s}")
+        except Exception as exc:
+            logger.warning("문장 번역 실패, 원문 유지 (%s): %s", article.title, exc)
+            lines.append(f"- {s} (번역 실패)")
+    return "\n".join(lines)
 
 
 def summarize_article(
@@ -116,7 +149,8 @@ def summarize_article(
     """체크한 기사 본문을 요약해 body(불릿 텍스트)를 반환.
 
     mode:
-      - "simple": 토큰을 쓰지 않는 단순 추출 요약 (번역 없음, 무료)
+      - "simple": 토큰을 쓰지 않는 단순 추출 요약 (번역 없음, 무료, API 키 불필요)
+      - "free": Google 번역(비공식, 무료)으로 문장을 한국어로 번역 (API 키 불필요)
       - "ai": Claude API로 번역/요약 (토큰 사용). 키가 없으면 예외 발생
       - "auto": 키가 있으면 ai, 없으면 simple로 자동 대체 (기존 동작)
 
@@ -127,6 +161,9 @@ def summarize_article(
 
     if mode == "simple":
         return _summarize_fallback(article, full_text)
+
+    if mode == "free":
+        return _summarize_free_translate(article, full_text)
 
     if mode == "ai":
         if not effective_key:
