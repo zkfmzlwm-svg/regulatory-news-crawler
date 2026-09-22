@@ -24,7 +24,10 @@ streamlit run app.py
 브라우저가 자동으로 열립니다(수동으로 열려면 http://localhost:8501).
 
 - 왼쪽 사이드바: "🔄 기사 수집 실행" 버튼, 키워드/출처 필터, 사이트 추가
-- 본문 표: 기사별 **체크박스**로 원하는 기사 선택 → "📝 선택한 기사 요약 생성" 클릭
+- 본문 표: 기사별 **체크박스**로 원하는 기사 선택
+- 요약 버튼 두 가지:
+  - **🆓 단순 요약 (토큰 미사용)** — 번역 없이 원문 문장을 그대로 추출. 내용을 먼저 훑어볼 때 사용 (무료)
+  - **🤖 AI 요약 생성 (토큰 사용)** — Claude API로 한국어 번역/요약 (`ANTHROPIC_API_KEY` 필요, 기사당 토큰 소모)
 - 요약 결과가 화면에 바로 표시되고, 파일(md/txt/docx)로 다운로드 가능
 
 ## 터미널(CLI)로 사용하기
@@ -41,7 +44,9 @@ python main.py list --source "FDA - Press Announcements" --keyword biosimilar
 python main.py check 1,3,5-8
 
 # 4) 체크된 기사 요약 생성 (config/summary_format.yaml 서식 적용)
-python main.py summarize
+python main.py summarize                 # auto: API 키 있으면 AI, 없으면 단순 요약
+python main.py summarize --mode simple    # 토큰 미사용, 번역 없는 단순 요약
+python main.py summarize --mode ai        # Claude 요약 강제 (토큰 사용, 키 없으면 에러)
 # 특정 파일로 저장
 python main.py summarize --output output/my_summary.md
 ```

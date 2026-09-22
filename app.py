@@ -131,15 +131,20 @@ else:
     selected_ids = edited.loc[edited["선택"], "id"].tolist()
     st.caption(f"{len(articles)}건 표시 중 · {len(selected_ids)}건 선택됨")
 
-    if st.button("📝 선택한 기사 요약 생성", type="primary", disabled=not selected_ids):
+    def run_summarize(mode: str, spinner_label: str):
         fmt = load_format(str(FORMAT_CONFIG))
         selected_articles = store.get_by_ids(selected_ids)
         entries = []
+        errors = []
         progress = st.progress(0.0)
         for i, a in enumerate(selected_articles, start=1):
-            with st.spinner(f"요약 중 ({i}/{len(selected_articles)}): [{a.tag or a.source}] {a.title}"):
+            with st.spinner(f"{spinner_label} ({i}/{len(selected_articles)}): [{a.tag or a.source}] {a.title}"):
                 full_text = fetch_full_text(a.url)
-                body = summarize_article(a, full_text, fmt)
+                try:
+                    body = summarize_article(a, full_text, fmt, mode=mode)
+                except Exception as exc:
+                    errors.append(f"{a.title}: {exc}")
+                    body = f"- (요약 실패: {exc})"
                 entries.append(SummaryEntry(index=i, article=a, body=body))
             progress.progress(i / len(selected_articles))
 
@@ -151,8 +156,35 @@ else:
 
         st.session_state["last_summary_preview"] = render_txt(fmt, entries)
         st.session_state["last_summary_path"] = output_path
-        st.success(f"{len(entries)}건 요약 완료 → {output_path}")
+        if errors:
+            st.warning(f"{len(entries)}건 중 {len(errors)}건 요약 실패:\n" + "\n".join(errors))
+        else:
+            st.success(f"{len(entries)}건 요약 완료 → {output_path}")
         st.rerun()
+
+    has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button(
+            "🆓 단순 요약 (토큰 미사용)",
+            use_container_width=True,
+            disabled=not selected_ids,
+            help="번역 없이 원문 문장을 그대로 추출합니다. 내용을 먼저 확인할 때 사용하세요.",
+        ):
+            run_summarize("simple", "단순 요약 중")
+    with col2:
+        if st.button(
+            "🤖 AI 요약 생성 (토큰 사용)",
+            type="primary",
+            use_container_width=True,
+            disabled=not selected_ids or not has_api_key,
+            help=(
+                "Claude API로 한국어 번역·요약을 생성합니다 (기사당 토큰 소모)."
+                if has_api_key
+                else "ANTHROPIC_API_KEY가 설정되어 있지 않아 사용할 수 없습니다."
+            ),
+        ):
+            run_summarize("ai", "AI 요약 생성 중")
 
 if "last_summary_preview" in st.session_state:
     st.divider()

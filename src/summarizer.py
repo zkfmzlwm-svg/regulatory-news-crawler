@@ -103,8 +103,24 @@ def _summarize_fallback(article: Article, full_text: Optional[str]) -> str:
     return "\n".join(f"- {s}" for s in bullets) if bullets else "- (본문을 가져오지 못했습니다)"
 
 
-def summarize_article(article: Article, full_text: Optional[str], fmt: SummaryFormat) -> str:
-    """체크한 기사 본문을 요약해 body(불릿 텍스트)를 반환."""
+def summarize_article(
+    article: Article, full_text: Optional[str], fmt: SummaryFormat, mode: str = "auto"
+) -> str:
+    """체크한 기사 본문을 요약해 body(불릿 텍스트)를 반환.
+
+    mode:
+      - "simple": 토큰을 쓰지 않는 단순 추출 요약 (번역 없음, 무료)
+      - "ai": Claude API로 번역/요약 (토큰 사용). API 키가 없으면 예외 발생
+      - "auto": API 키가 있으면 ai, 없으면 simple로 자동 대체 (기존 동작)
+    """
+    if mode == "simple":
+        return _summarize_fallback(article, full_text)
+
+    if mode == "ai":
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise RuntimeError("ANTHROPIC_API_KEY가 설정되어 있지 않아 AI 요약을 사용할 수 없습니다.")
+        return _summarize_with_claude(article, full_text, fmt)
+
     if os.environ.get("ANTHROPIC_API_KEY"):
         try:
             return _summarize_with_claude(article, full_text, fmt)
