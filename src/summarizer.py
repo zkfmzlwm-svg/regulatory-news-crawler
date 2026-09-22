@@ -203,6 +203,10 @@ def render_docx(fmt: SummaryFormat, entries: List[SummaryEntry], output_path: st
     doc.save(output_path)
 
 
+def output_extension(fmt: SummaryFormat) -> str:
+    return {"docx": "docx", "txt": "txt"}.get(fmt.output_format.lower(), "md")
+
+
 def write_summaries(fmt: SummaryFormat, entries: List[SummaryEntry], output_path: str) -> str:
     output_format = fmt.output_format.lower()
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)

@@ -9,7 +9,7 @@ from .crawler import crawl_all, load_sources, save_sources
 from .fetcher import fetch_full_text
 from .models import Article
 from .storage import DEFAULT_DB_PATH, Storage
-from .summarizer import SummaryEntry, load_format, summarize_article, write_summaries
+from .summarizer import SummaryEntry, load_format, output_extension, summarize_article, write_summaries
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCES_CONFIG = BASE_DIR / "config" / "sources.yaml"
@@ -139,9 +139,8 @@ def cmd_summarize(args):
     if args.output:
         output_path = args.output
     else:
-        ext = {"docx": "docx", "txt": "txt"}.get(fmt.output_format.lower(), "md")
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = str(DEFAULT_OUTPUT_DIR / f"summary_{ts}.{ext}")
+        output_path = str(DEFAULT_OUTPUT_DIR / f"summary_{ts}.{output_extension(fmt)}")
 
     write_summaries(fmt, entries, output_path)
     store.set_summarized([a.id for a in articles], summarized=True)

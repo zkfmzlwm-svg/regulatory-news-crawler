@@ -1,13 +1,13 @@
 # regulatory-news-crawler
 
-해외 주요 의약품 규제 뉴스를 수집 → 목록에서 원하는 기사만 체크 → 내가 정한 서식으로 요약해주는 CLI 도구.
+해외 주요 의약품 규제 뉴스를 수집 → 화면에서 원하는 기사만 체크 → 내가 정한 서식으로 요약해주는 도구.
+화면(웹 GUI)과 터미널(CLI) 두 가지 방식 모두 지원하며, 둘 다 같은 데이터(`data/articles.db`)를 공유합니다.
 
 ## 동작 흐름
 
-1. `crawl` : `config/sources.yaml` 에 등록된 사이트(FDA, EMA, MHRA, Health Canada, TGA, WHO, RAPS 등 기본 제공 + 직접 추가한 사이트)에서 기사를 수집해 로컬 DB(`data/articles.db`)에 저장
-2. `list` : 수집된 기사를 번호와 함께 나열
-3. `check` : 요약하고 싶은 기사 번호를 체크
-4. `summarize` : 체크된 기사만 원문을 가져와 `config/summary_format.yaml` 에 정의한 서식대로 요약 파일(md/txt/docx) 생성
+1. 기사 수집 : `config/sources.yaml` 에 등록된 사이트(FDA, EMA, MHRA, Health Canada, TGA, WHO, RAPS 등 기본 제공 + 직접 추가한 사이트)에서 기사를 수집해 로컬 DB(`data/articles.db`)에 저장
+2. 목록에서 원하는 기사 체크
+3. 체크한 기사만 원문을 가져와 `config/summary_format.yaml` 에 정의한 서식대로 요약 파일(md/txt/docx) 생성
 
 ## 설치
 
@@ -15,7 +15,19 @@
 pip install -r requirements.txt
 ```
 
-## 사용법
+## 화면(GUI)으로 사용하기 — 추천
+
+```bash
+streamlit run app.py
+```
+
+브라우저가 자동으로 열립니다(수동으로 열려면 http://localhost:8501).
+
+- 왼쪽 사이드바: "🔄 기사 수집 실행" 버튼, 키워드/출처 필터, 사이트 추가
+- 본문 표: 기사별 **체크박스**로 원하는 기사 선택 → "📝 선택한 기사 요약 생성" 클릭
+- 요약 결과가 화면에 바로 표시되고, 파일(md/txt/docx)로 다운로드 가능
+
+## 터미널(CLI)로 사용하기
 
 ```bash
 # 1) 기사 수집
