@@ -110,10 +110,24 @@ with st.sidebar:
                 st.rerun()
 
     st.divider()
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        st.caption("✅ Claude 요약 사용 중 (번역/분석 포함)")
+    st.header("4. 내 API 키 (선택)")
+    st.caption("이 브라우저 세션에서만 사용되고 파일에 저장되지 않습니다. 새로고침하면 다시 입력해야 합니다.")
+    user_api_key = st.text_input(
+        "내 Anthropic API 키",
+        type="password",
+        placeholder="sk-ant-...",
+        value=st.session_state.get("user_api_key", ""),
+        key="user_api_key_input",
+    )
+    st.session_state["user_api_key"] = user_api_key
+
+    effective_api_key = user_api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if user_api_key:
+        st.caption("✅ 내가 입력한 키로 AI 요약 사용 중")
+    elif os.environ.get("ANTHROPIC_API_KEY"):
+        st.caption("✅ 서버에 설정된 키로 AI 요약 사용 중")
     else:
-        st.caption("⚠️ ANTHROPIC_API_KEY 미설정 — 단순 추출 요약으로 동작")
+        st.caption("⚠️ API 키 미설정 — 위에 내 키를 입력하거나, 단순 추출 요약만 사용 가능")
 
 # ---------------- 본문: 기사 목록 + 체크박스 선택 ----------------
 articles = store.list_articles(
@@ -170,7 +184,7 @@ else:
             with st.spinner(f"{spinner_label} ({i}/{len(selected_articles)}): [{a.tag or a.source}] {a.title}"):
                 full_text = fetch_full_text(a.url)
                 try:
-                    body = summarize_article(a, full_text, fmt, mode=mode)
+                    body = summarize_article(a, full_text, fmt, mode=mode, api_key=user_api_key or None)
                 except Exception as exc:
                     errors.append(f"{a.title}: {exc}")
                     body = f"- (요약 실패: {exc})"
@@ -191,7 +205,6 @@ else:
             st.success(f"{len(entries)}건 요약 완료 → {output_path}")
         st.rerun()
 
-    has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
     col1, col2 = st.columns(2)
     with col1:
         if st.button(
@@ -206,11 +219,11 @@ else:
             "🤖 AI 요약 생성 (토큰 사용)",
             type="primary",
             use_container_width=True,
-            disabled=not selected_ids or not has_api_key,
+            disabled=not selected_ids or not effective_api_key,
             help=(
                 "Claude API로 한국어 번역·요약을 생성합니다 (기사당 토큰 소모)."
-                if has_api_key
-                else "ANTHROPIC_API_KEY가 설정되어 있지 않아 사용할 수 없습니다."
+                if effective_api_key
+                else "API 키가 없습니다. 왼쪽 사이드바 '4. 내 API 키'에 본인 키를 입력하세요."
             ),
         ):
             run_summarize("ai", "AI 요약 생성 중")

@@ -50,10 +50,13 @@ def load_format(config_path: str) -> SummaryFormat:
     )
 
 
-def _summarize_with_claude(article: Article, full_text: Optional[str], fmt: SummaryFormat) -> str:
+def _summarize_with_claude(
+    article: Article, full_text: Optional[str], fmt: SummaryFormat, api_key: Optional[str] = None
+) -> str:
     from anthropic import Anthropic
 
-    client = Anthropic()  # reads ANTHROPIC_API_KEY from env
+    # api_key가 주어지면 그 키를 쓰고, 없으면 SDK가 ANTHROPIC_API_KEY 환경변수를 읽음
+    client = Anthropic(api_key=api_key) if api_key else Anthropic()
 
     body = full_text or article.excerpt or "(본문을 가져오지 못했습니다. 제목과 출처 정보만으로 작성)"
     body = body[:12000]  # keep prompt size reasonable
@@ -104,26 +107,35 @@ def _summarize_fallback(article: Article, full_text: Optional[str]) -> str:
 
 
 def summarize_article(
-    article: Article, full_text: Optional[str], fmt: SummaryFormat, mode: str = "auto"
+    article: Article,
+    full_text: Optional[str],
+    fmt: SummaryFormat,
+    mode: str = "auto",
+    api_key: Optional[str] = None,
 ) -> str:
     """체크한 기사 본문을 요약해 body(불릿 텍스트)를 반환.
 
     mode:
       - "simple": 토큰을 쓰지 않는 단순 추출 요약 (번역 없음, 무료)
-      - "ai": Claude API로 번역/요약 (토큰 사용). API 키가 없으면 예외 발생
-      - "auto": API 키가 있으면 ai, 없으면 simple로 자동 대체 (기존 동작)
+      - "ai": Claude API로 번역/요약 (토큰 사용). 키가 없으면 예외 발생
+      - "auto": 키가 있으면 ai, 없으면 simple로 자동 대체 (기존 동작)
+
+    api_key: 명시적으로 지정하면 이 키를 사용 (예: 화면에서 개인 키를 입력한 경우).
+             지정하지 않으면 ANTHROPIC_API_KEY 환경변수를 사용.
     """
+    effective_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+
     if mode == "simple":
         return _summarize_fallback(article, full_text)
 
     if mode == "ai":
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise RuntimeError("ANTHROPIC_API_KEY가 설정되어 있지 않아 AI 요약을 사용할 수 없습니다.")
-        return _summarize_with_claude(article, full_text, fmt)
+        if not effective_key:
+            raise RuntimeError("API 키가 설정되어 있지 않아 AI 요약을 사용할 수 없습니다.")
+        return _summarize_with_claude(article, full_text, fmt, api_key=api_key)
 
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    if effective_key:
         try:
-            return _summarize_with_claude(article, full_text, fmt)
+            return _summarize_with_claude(article, full_text, fmt, api_key=api_key)
         except Exception as exc:
             logger.warning("Claude 요약 실패, 단순 요약으로 대체 (%s): %s", article.title, exc)
     return _summarize_fallback(article, full_text)
