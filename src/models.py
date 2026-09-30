@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -13,6 +13,6 @@ class Article:
     url: str = ""
     published_at: Optional[str] = None  # ISO 8601 string
     excerpt: str = ""
-    collected_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    collected_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     checked: bool = False
     summarized: bool = False

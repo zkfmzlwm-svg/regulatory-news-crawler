@@ -103,16 +103,19 @@ python main.py add-source --name "My Site" --url "https://example.com/news" --ty
 2. 상대방이 `pip install -r requirements.txt` 후 `python app.py` 실행
 
 exe 파일 하나로 만들어 Python 설치 없이 실행하게 하려면 [PyInstaller](https://pyinstaller.org/) 를 씁니다.
+Windows PowerShell 에서 저장소 폴더로 이동한 뒤 (한 줄로 입력):
 
-```bash
+```powershell
 pip install pyinstaller
-pyinstaller --onefile --windowed app.py
+pyinstaller --onefile --windowed --name regulatory-news-crawler --add-data "config;config" --collect-data trafilatura --collect-data justext app.py
 ```
 
-`dist/app.exe` (Windows) 가 생성되며, 더블클릭만으로 실행됩니다. 단, `config/`, `data/`, `output/` 폴더는 exe와 같은 위치에 함께 있어야 합니다.
+- `dist\regulatory-news-crawler.exe` 가 생성되며, 이 파일 하나만 전달하면 더블클릭으로 실행됩니다.
+- 처음 실행하면 exe 옆에 `config/`(사이트 목록·서식), `data/`(수집한 기사 DB), `output/`(요약 파일) 폴더가 자동으로 생깁니다. 사이트 목록을 바꾸려면 exe 옆 `config/sources.yaml` 을 수정하세요.
+- `--add-data`, `--collect-data` 옵션을 빼면 기본 설정이 빠지거나 본문 추출 라이브러리가 동작하지 않아 요약이 실패하니 꼭 포함하세요.
 
 ## 참고
 
-- 이 프로그램은 API 키나 결제 등록이 전혀 필요 없습니다. "🌍 번역 요약"은 Google 번역의 비공식 무료 엔드포인트를 사용하므로, 가끔 번역이 실패할 수 있습니다(그 경우 해당 문장만 원문으로 표시되고 나머지는 정상 처리됩니다).
-- 실행 환경의 네트워크에 따라 일부 규제기관 사이트가 접근 제한될 수 있습니다. `crawl` 은 사이트 단위로 실패를 격리하므로 한 사이트가 막혀도 나머지는 정상 수집됩니다.
-- 기본 제공 RSS 주소는 각 기관 사이트 개편 시 바뀔 수 있으니, 수집이 안 되면 `config/sources.yaml` 의 URL을 최신 주소로 갱신하세요.
+- 이 프로그램은 API 키나 결제 등록이 전혀 필요 없습니다. "🌍 번역 요약"은 Google 번역의 비공식 무료 엔드포인트를 사용하므로, 가끔 번역이 실패할 수 있습니다(그 경우 해당 문장만 원문 + "(번역 실패)"로 표시되고 나머지는 정상 처리됩니다).
+- "기사 수집"이 끝나면 아래 결과창에 **사이트별 수집 결과**(✔ 성공 건수 / ✖ 실패 사유 / △ 0건)가 표시됩니다. 한 사이트가 막혀도 나머지는 정상 수집됩니다.
+- ✖ 실패나 △ 0건이 계속되는 사이트는 주소가 바뀌었거나 구조가 맞지 않는 것이니, `config/sources.yaml` 의 URL(또는 html 선택자)을 갱신하세요. 사이트별 결과를 알려주시면 고칠 수 있습니다.

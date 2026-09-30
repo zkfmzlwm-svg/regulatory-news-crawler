@@ -7,8 +7,9 @@ from pathlib import Path
 from tkinter import BooleanVar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
-from src.crawler import crawl_all, load_sources, save_sources
+from src.crawler import crawl_all, format_report, load_sources, save_sources
 from src.fetcher import fetch_full_text
+from src.paths import FORMAT_CONFIG, OUTPUT_DIR, SOURCES_CONFIG, ensure_default_config
 from src.storage import DEFAULT_DB_PATH, Storage
 from src.summarizer import (
     SummaryEntry,
@@ -20,10 +21,7 @@ from src.summarizer import (
 )
 from src.utils import clean_text
 
-BASE_DIR = Path(__file__).resolve().parent
-SOURCES_CONFIG = BASE_DIR / "config" / "sources.yaml"
-FORMAT_CONFIG = BASE_DIR / "config" / "summary_format.yaml"
-OUTPUT_DIR = BASE_DIR / "output"
+UI_FONT = ("Malgun Gothic", 10)
 
 
 class App(Tk):
@@ -33,6 +31,7 @@ class App(Tk):
         self.geometry("1120x760")
         self.minsize(900, 600)
 
+        ensure_default_config()
         self.store = Storage(DEFAULT_DB_PATH)
         self.articles = []
         self.selected_ids = set()
@@ -57,11 +56,11 @@ class App(Tk):
         keyword_entry.pack(side="left", padx=(4, 8))
         keyword_entry.bind("<Return>", lambda e: self.refresh_list())
 
-        self.unchecked_only_var = BooleanVar()
+        self.unsummarized_only_var = BooleanVar()
         ttk.Checkbutton(
             toolbar,
             text="요약 안 한 것만",
-            variable=self.unchecked_only_var,
+            variable=self.unsummarized_only_var,
             command=self.refresh_list,
         ).pack(side="left", padx=(0, 8))
 
@@ -102,16 +101,16 @@ class App(Tk):
         self.selection_label = ttk.Label(action_frame, text="0건 표시 · 0건 선택됨")
         self.selection_label.pack(side="left")
 
-        ttk.Button(
-            action_frame, text="🌍 번역 요약 (무료)", command=lambda: self.start_summarize("free")
-        ).pack(side="right", padx=4)
-        ttk.Button(
-            action_frame, text="🆓 단순 요약 (영어)", command=lambda: self.start_summarize("simple")
-        ).pack(side="right", padx=4)
+        self.summary_buttons = [
+            ttk.Button(action_frame, text="🌍 번역 요약 (무료)", command=lambda: self.start_summarize("free")),
+            ttk.Button(action_frame, text="🆓 단순 요약 (영어)", command=lambda: self.start_summarize("simple")),
+        ]
+        for btn in self.summary_buttons:
+            btn.pack(side="right", padx=4)
 
-        result_frame = ttk.LabelFrame(self, text="요약 결과", padding=8)
+        result_frame = ttk.LabelFrame(self, text="결과", padding=8)
         result_frame.pack(fill="both", expand=False, padx=8, pady=(0, 8))
-        self.result_text = ScrolledText(result_frame, height=14, wrap="word", font=("맑은 고딕", 10))
+        self.result_text = ScrolledText(result_frame, height=14, wrap="word", font=UI_FONT)
         self.result_text.pack(fill="both", expand=True)
 
         save_row = ttk.Frame(result_frame)
@@ -125,7 +124,9 @@ class App(Tk):
     def refresh_list(self):
         keyword = self.keyword_var.get().strip() or None
         self.articles = self.store.list_articles(
-            keyword=keyword, unchecked_only=self.unchecked_only_var.get(), limit=300
+            keyword=keyword,
+            summarized=False if self.unsummarized_only_var.get() else None,
+            limit=300,
         )
         self.selected_ids &= {a.id for a in self.articles}
         self._render_tree()
@@ -141,6 +142,9 @@ class App(Tk):
                 iid=str(a.id),
                 values=(mark, (a.published_at or "")[:10], a.tag or a.source, clean_text(a.title), done),
             )
+        self._update_selection_label()
+
+    def _update_selection_label(self):
         self.selection_label.config(text=f"{len(self.articles)}건 표시 · {len(self.selected_ids)}건 선택됨")
 
     def _on_tree_click(self, event):
@@ -156,9 +160,14 @@ class App(Tk):
             self.selected_ids.discard(aid)
         else:
             self.selected_ids.add(aid)
-        self._render_tree()
+        self.tree.set(row_id, "select", "☑" if aid in self.selected_ids else "☐")
+        self._update_selection_label()
 
     def _on_tree_double_click(self, event):
+        # '선택' 칸을 빠르게 두 번 누른 건 원문 열기가 아니라 체크를 한 번 더 누른 것
+        if self.tree.identify_column(event.x) == "#1":
+            self._on_tree_click(event)
+            return
         row_id = self.tree.identify_row(event.y)
         if not row_id:
             return
@@ -175,18 +184,28 @@ class App(Tk):
     def _crawl_worker(self):
         try:
             sources = load_sources(str(SOURCES_CONFIG))
-            found = crawl_all(sources)
+            report = []
+            found = crawl_all(
+                sources,
+                report=report,
+                progress=lambda i, n, name: self.task_queue.put(("crawl_progress", (i, n, name))),
+            )
             added = self.store.add_articles(found)
-            self.task_queue.put(("crawl_done", (len(found), added)))
+            self.task_queue.put(("crawl_done", (len(found), added, report)))
         except Exception as exc:
             self.task_queue.put(("crawl_error", str(exc)))
 
     # ---------------- 요약 ----------------
+    def _set_summarizing(self, busy: bool):
+        for btn in self.summary_buttons:
+            btn.config(state="disabled" if busy else "normal")
+
     def start_summarize(self, mode: str):
         if not self.selected_ids:
             messagebox.showinfo("알림", "표의 '선택' 칸을 클릭해 요약할 기사를 먼저 골라주세요.")
             return
         ids = list(self.selected_ids)
+        self._set_summarizing(True)
         self.status_var.set("요약 준비 중...")
         threading.Thread(target=self._summarize_worker, args=(ids, mode), daemon=True).start()
 
@@ -241,10 +260,20 @@ class App(Tk):
         self.after(100, self._poll_queue)
 
     def _handle_task_result(self, kind, payload):
-        if kind == "crawl_done":
-            found, added = payload
+        if kind == "crawl_progress":
+            i, n, name = payload
+            self.status_var.set(f"수집 중 ({i}/{n}): {name}")
+        elif kind == "crawl_done":
+            found, added, report = payload
+            failed = sum(1 for r in report if r.error)
             self.crawl_btn.config(state="normal", text="🔄 기사 수집")
-            self.status_var.set(f"수집 완료: 조회 {found}건 · 신규 저장 {added}건")
+            self.status_var.set(
+                f"수집 완료: 조회 {found}건 · 신규 저장 {added}건"
+                + (f" · 실패 {failed}곳 (아래 결과창 참고)" if failed else "")
+            )
+            self.last_output_path = None
+            self.result_text.delete("1.0", "end")
+            self.result_text.insert("1.0", f"[사이트별 수집 결과]\n{format_report(report)}\n")
             self.refresh_list()
         elif kind == "crawl_error":
             self.crawl_btn.config(state="normal", text="🔄 기사 수집")
@@ -255,6 +284,7 @@ class App(Tk):
             self.status_var.set(f"요약 중 ({i}/{total}): {title}")
         elif kind == "summarize_done":
             preview, output_path, n = payload
+            self._set_summarizing(False)
             self.status_var.set(f"요약 완료: {n}건 → {output_path}")
             self.last_output_path = output_path
             self.result_text.delete("1.0", "end")
@@ -262,6 +292,7 @@ class App(Tk):
             self.selected_ids.clear()
             self.refresh_list()
         elif kind == "summarize_error":
+            self._set_summarizing(False)
             self.status_var.set("요약 실패")
             messagebox.showerror("요약 실패", payload)
 
@@ -319,6 +350,9 @@ class SourceManagerDialog(Toplevel):
         tag = self.tag_var.get().strip() or name
         if not name or not url:
             messagebox.showwarning("입력 필요", "이름과 URL을 입력하세요.", parent=self)
+            return
+        if any(s.get("name") == name for s in self.sources):
+            messagebox.showwarning("중복", f"'{name}' 이름의 사이트가 이미 있습니다.", parent=self)
             return
         self.sources.append(
             {"name": name, "type": "rss", "url": url, "tag": tag, "region": "Custom", "enabled": True}

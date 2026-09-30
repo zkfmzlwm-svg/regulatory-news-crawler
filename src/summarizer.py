@@ -11,6 +11,19 @@ from .utils import clean_text, strip_tags
 
 logger = logging.getLogger(__name__)
 
+MAX_BULLETS = 5
+
+# "U.S.", "Jan. 5", "Dr. Smith" 같은 약어 뒤에서는 문장을 자르지 않는다
+_ABBREVIATIONS = [
+    "Mr", "Ms", "Mrs", "Dr", "St", "No", "vs", "Inc", "Ltd", "Co", "Corp", "Fig", "approx",
+    "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec", "e.g", "i.e",
+]
+_SENTENCE_SPLIT = re.compile(
+    r"(?<!\.[A-Z]\.)"
+    + "".join(rf"(?<!\b{re.escape(a)}\.)" for a in _ABBREVIATIONS)
+    + r"(?<=[.!?])\s+(?=[A-Z0-9\"“‘'(\[])"
+)
+
 
 @dataclass
 class SummaryFormat:
@@ -44,9 +57,20 @@ def load_format(config_path: str) -> SummaryFormat:
 
 
 def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
-    text = strip_tags(full_text or article.excerpt or "").strip()
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    return [s.strip() for s in sentences if s.strip()][:5]
+    text = strip_tags(full_text or article.excerpt or "")
+    title = clean_text(article.title).lower()
+    sentences: List[str] = []
+    for para in text.splitlines():
+        para = re.sub(r"\s+", " ", para).strip()
+        # 본문 첫 줄에 반복되는 기사 제목과, 문장이 아닌 짧은 소제목("Background" 등)은 건너뛴다
+        if not para or para.lower() == title:
+            continue
+        if len(para.split()) < 4 and not para.endswith((".", "!", "?")):
+            continue
+        sentences.extend(s.strip() for s in _SENTENCE_SPLIT.split(para) if len(s.strip()) >= 3)
+        if len(sentences) >= MAX_BULLETS:
+            break
+    return sentences[:MAX_BULLETS]
 
 
 def _summarize_fallback(article: Article, full_text: Optional[str]) -> str:
@@ -61,17 +85,23 @@ def _summarize_free_translate(article: Article, full_text: Optional[str]) -> str
     실제 AI 요약처럼 내용을 재구성/분석하지는 않고 추출한 문장을 그대로 번역만 하므로
     품질은 AI 요약보다 단순하지만, 번역된 한국어 결과를 얻는 데 비용이 들지 않는다.
     """
+    try:
+        from deep_translator import GoogleTranslator
+    except ImportError as exc:
+        raise RuntimeError(
+            "번역 모듈(deep-translator)이 설치되어 있지 않습니다. "
+            "'pip install -r requirements.txt' 를 실행한 뒤 다시 시도하세요."
+        ) from exc
+
     bullets = _extract_sentences(article, full_text)
     if not bullets:
         return "- (본문을 가져오지 못했습니다)"
 
     try:
-        from deep_translator import GoogleTranslator
-
         translator = GoogleTranslator(source="auto", target="ko")
     except Exception as exc:
-        logger.warning("번역 모듈 로드 실패, 원문으로 대체: %s", exc)
-        return "\n".join(f"- {s}" for s in bullets)
+        logger.warning("번역기 초기화 실패, 원문으로 대체: %s", exc)
+        return "\n".join(f"- {s} (번역 실패)" for s in bullets)
 
     lines = []
     for s in bullets:

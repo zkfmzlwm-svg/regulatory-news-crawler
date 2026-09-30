@@ -17,9 +17,9 @@ sources:
     tag: "FDA"
     enabled: true
 
-  - name: "FDA - Drug Safety & Availability"
+  - name: "FDA - What's New (Drugs)"
     type: rss
-    url: "https://www.fda.gov/drugs/drug-safety-and-availability/rss.xml"
+    url: "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/drugs/rss.xml"
     region: "US"
     tag: "FDA"
     enabled: true
@@ -87,14 +87,15 @@ sources:
     region: "EU"
     tag: "GMP-Compliance"
     enabled: true
-    # 주의: 이 사이트는 RSS 유무를 확인하지 못해 일반적인 뉴스 목록 구조로 추정해 등록했습니다.
-    # "기사 수집" 후 이 사이트에서 0건이면 선택자가 안 맞는 것이니, 페이지의 기사 목록 부분
-    # HTML(브라우저 개발자도구 F12 > Elements)을 보내주시면 정확한 선택자로 고쳐드립니다.
+    # 주의: 이 사이트는 구조를 직접 확인하지 못해 일반적인 뉴스 목록 구조로 추정해 등록했습니다.
+    # item/title 선택자로 못 찾으면 주소에 "/gmp-news/" 가 들어간 긴 제목 링크들을 기사로 수집합니다.
+    # 그래도 0건이면 페이지의 기사 목록 부분 HTML(브라우저 F12 > Elements)을 보내주시면 고쳐드립니다.
     selectors:
       item: "article"
       title: "h2 a, h3 a"
       link: "h2 a, h3 a"
       date: "time"
+      link_pattern: "/gmp-news/"
 
   # ---------------- 사이트 추가 예시 (참고용) ----------------
   # - name: "My Custom Source"
@@ -109,3 +110,4 @@ sources:
   #     link: "a.title"               # 블록 내 링크 요소 (href 사용)
   #     date: "span.date"             # 블록 내 날짜 요소 (선택)
   #     summary: "p.excerpt"          # 블록 내 요약 요소 (선택)
+  #     link_pattern: "/news/"        # 위 선택자로 못 찾을 때, 주소에 이 문자열이 든 긴 제목 링크를 기사로 수집 (선택)

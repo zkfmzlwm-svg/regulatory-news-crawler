@@ -4,8 +4,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from .models import Article
-
-DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "articles.db"
+from .paths import DB_PATH as DEFAULT_DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles (

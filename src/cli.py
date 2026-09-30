@@ -5,17 +5,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from .crawler import crawl_all, load_sources, save_sources
+from .crawler import crawl_all, format_report, load_sources, save_sources
 from .fetcher import fetch_full_text
 from .models import Article
+from .paths import FORMAT_CONFIG as DEFAULT_FORMAT_CONFIG
+from .paths import OUTPUT_DIR as DEFAULT_OUTPUT_DIR
+from .paths import SOURCES_CONFIG as DEFAULT_SOURCES_CONFIG
 from .storage import DEFAULT_DB_PATH, Storage
 from .summarizer import SummaryEntry, load_format, output_extension, summarize_article, write_summaries
 from .utils import clean_text
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_SOURCES_CONFIG = BASE_DIR / "config" / "sources.yaml"
-DEFAULT_FORMAT_CONFIG = BASE_DIR / "config" / "summary_format.yaml"
-DEFAULT_OUTPUT_DIR = BASE_DIR / "output"
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -31,9 +29,11 @@ def _fmt_row(a: Article) -> str:
 def cmd_crawl(args):
     sources = load_sources(args.sources_config)
     store = Storage(Path(args.db))
-    articles = crawl_all(sources, only=args.only)
+    report = []
+    articles = crawl_all(sources, only=args.only, report=report)
     added = store.add_articles(articles)
-    print(f"수집 완료: 총 {len(articles)}건 조회, 신규 {added}건 저장 (DB: {args.db})")
+    print(format_report(report))
+    print(f"\n수집 완료: 총 {len(articles)}건 조회, 신규 {added}건 저장 (DB: {args.db})")
 
 
 def cmd_sources(args):
@@ -54,6 +54,7 @@ def cmd_add_source(args):
         "type": args.type,
         "url": args.url,
         "region": args.region or "Custom",
+        "tag": args.tag or args.name,
         "enabled": True,
     }
     if args.type == "html":
@@ -65,11 +66,16 @@ def cmd_add_source(args):
                 "link": args.link_selector,
                 "date": args.date_selector,
                 "summary": args.summary_selector,
+                "link_pattern": args.link_pattern,
             }.items()
             if v
         }
-        if "item" not in entry["selectors"] or "title" not in entry["selectors"]:
-            print("html 타입은 --item-selector 와 --title-selector 가 필요합니다.", file=sys.stderr)
+        sel = entry["selectors"]
+        if not ({"item", "title"} <= sel.keys() or "link_pattern" in sel):
+            print(
+                "html 타입은 --item-selector/--title-selector 또는 --link-pattern 이 필요합니다.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     sources.append(entry)
@@ -173,11 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument("--url", required=True)
     p_add.add_argument("--type", choices=["rss", "html"], default="rss")
     p_add.add_argument("--region", default="")
+    p_add.add_argument("--tag", help="요약 제목에 붙는 [태그] (기본: 이름)")
     p_add.add_argument("--item-selector", help="(html) 기사 블록 CSS 선택자")
     p_add.add_argument("--title-selector", help="(html) 제목 CSS 선택자")
     p_add.add_argument("--link-selector", help="(html) 링크 CSS 선택자 (기본: title-selector)")
     p_add.add_argument("--date-selector", help="(html) 날짜 CSS 선택자")
     p_add.add_argument("--summary-selector", help="(html) 요약 CSS 선택자")
+    p_add.add_argument("--link-pattern", help="(html) 선택자로 못 찾을 때 이 문자열이 주소에 든 링크를 기사로 수집")
     p_add.set_defaults(func=cmd_add_source)
 
     p_list = sub.add_parser("list", help="수집된 기사 목록 조회")
