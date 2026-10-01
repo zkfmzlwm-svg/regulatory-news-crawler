@@ -40,14 +40,21 @@ sources:
 
   - name: "Health Canada - Recalls & Safety Alerts"
     type: rss
-    url: "https://recalls-rappels.canada.ca/en/feed"
+    url: "https://recalls-rappels.canada.ca/en/feed/health-products-alerts-recalls"
     region: "CA"
     tag: "Health Canada"
     enabled: true
 
   - name: "TGA (Australia) - News"
     type: rss
-    url: "https://www.tga.gov.au/rss.xml"
+    url: "https://www.tga.gov.au/feeds/article/news.xml"
+    region: "AU"
+    tag: "TGA"
+    enabled: true
+
+  - name: "TGA (Australia) - Safety Alerts"
+    type: rss
+    url: "https://www.tga.gov.au/feeds/alert/safety-alerts.xml"
     region: "AU"
     tag: "TGA"
     enabled: true
@@ -59,16 +66,20 @@ sources:
     tag: "WHO"
     enabled: true
 
+  # RAPS 는 사이트 개편 후 RSS 가 없어져 목록 페이지에서 기사 링크를 직접 수집한다
   - name: "RAPS Regulatory Focus"
-    type: rss
-    url: "https://www.raps.org/rss/news"
+    type: html
+    url: "https://www.raps.org/news-and-articles/"
     region: "Global"
     tag: "RAPS"
     enabled: true
+    selectors:
+      link_pattern: "/news-and-articles/news-articles/"
 
-  - name: "Endpoints News - Regulatory"
+  # endpts.com -> endpoints.news 로 도메인 이전 (regulatory 카테고리 피드는 없어져 전체 피드 사용)
+  - name: "Endpoints News"
     type: rss
-    url: "https://endpts.com/category/regulatory/feed/"
+    url: "https://endpoints.news/feed/"
     region: "Global"
     tag: "Endpoints"
     enabled: true
