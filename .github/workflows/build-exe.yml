@@ -1,0 +1,77 @@
+# Windows 용 단일 실행 파일(regulatory-news-crawler.exe)을 빌드해 GitHub Release 에 올린다.
+# - 코드(src/app.py/config/requirements.txt)가 바뀌어 push 되면 자동 실행
+# - Actions 탭에서 "Build Windows EXE" > "Run workflow" 로 수동 실행도 가능
+
+name: Build Windows EXE
+
+on:
+  push:
+    paths:
+      - "app.py"
+      - "src/**"
+      - "config/**"
+      - "requirements.txt"
+      - ".github/workflows/build-exe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Check that the bot-block bypass (curl_cffi) is available
+        run: python -c "from src import net; assert net.cffi_requests is not None and net.IMPERSONATE_TARGETS, 'curl_cffi missing'"
+
+      - name: Build EXE
+        run: >
+          pyinstaller --onefile --windowed --name regulatory-news-crawler
+          --add-data "config;config"
+          --collect-data trafilatura --collect-data justext
+          --collect-all curl_cffi
+          app.py
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Copy-Item README.md dist/
+          Compress-Archive -Path dist/regulatory-news-crawler.exe, dist/README.md -DestinationPath dist/regulatory-news-crawler-windows.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: regulatory-news-crawler-windows
+          path: dist/regulatory-news-crawler.exe
+
+      - name: Set release tag
+        id: tag
+        shell: bash
+        run: echo "tag=build-$(date -u +%Y%m%d)-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Windows EXE ${{ steps.tag.outputs.tag }}
+          body: |
+            Windows 실행 파일 자동 빌드 (커밋 ${{ github.sha }}).
+
+            - `regulatory-news-crawler.exe` 를 내려받아 더블클릭하면 실행됩니다.
+            - 예전 exe 를 쓰던 폴더라면 exe 옆 `config/sources.yaml` 을 지운 뒤 실행해야 새 사이트 주소가 적용됩니다.
+          files: |
+            dist/regulatory-news-crawler.exe
+            dist/regulatory-news-crawler-windows.zip
