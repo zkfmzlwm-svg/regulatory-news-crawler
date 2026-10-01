@@ -97,6 +97,8 @@ def crawl_rss(source: Dict) -> List[Article]:
         if not title or not link:
             continue
         link = urljoin(base_url, link)
+        if link.startswith("http://"):
+            link = "https://" + link[len("http://"):]
         published = _normalize_date(
             getattr(entry, "published_parsed", None) or getattr(entry, "published", None)
             or getattr(entry, "updated_parsed", None) or getattr(entry, "updated", None)
@@ -204,12 +206,66 @@ def crawl_html(source: Dict) -> List[Article]:
     return list(unique.values())
 
 
+def _dig(data, path: str):
+    """"a.b.0.c" 같은 점 경로로 JSON 값을 꺼낸다."""
+    for key in path.split(".") if path else []:
+        if isinstance(data, list):
+            data = data[int(key)] if key.isdigit() and int(key) < len(data) else None
+        elif isinstance(data, dict):
+            data = data.get(key)
+        else:
+            return None
+    return data
+
+
+def crawl_json(source: Dict) -> List[Article]:
+    """RSS 가 없거나 멈춘 사이트의 JSON API (예: WHO 뉴스 API) 에서 기사 목록을 가져온다."""
+    name = source["name"]
+    url = source["url"]
+    fields = source.get("fields", {})
+    title_key = fields.get("title")
+    link_key = fields.get("link")
+    if not (title_key and link_key):
+        raise ValueError("json 타입은 fields.title/link 가 필요합니다")
+    link_prefix = source.get("link_prefix") or url
+
+    resp = http_get(url)
+    items = _dig(resp.json(), fields.get("items", ""))
+    if not isinstance(items, list):
+        raise ValueError("JSON 응답에서 기사 목록(fields.items)을 찾지 못했습니다")
+
+    articles: List[Article] = []
+    for item in items:
+        title = clean_text(str(_dig(item, title_key) or ""))
+        link = str(_dig(item, link_key) or "").strip()
+        if not title or not link:
+            continue
+        if not link.startswith("http"):
+            link = link_prefix.rstrip("/") + "/" + link.lstrip("/")
+        date_key = fields.get("date")
+        summary_key = fields.get("summary")
+        articles.append(
+            Article(
+                source=name,
+                region=source.get("region", ""),
+                tag=_default_tag(source),
+                title=title,
+                url=link,
+                published_at=_normalize_date(str(_dig(item, date_key) or "")) if date_key else None,
+                excerpt=clean_text(str(_dig(item, summary_key) or ""))[:500] if summary_key else "",
+            )
+        )
+    return articles
+
+
 def crawl_source(source: Dict) -> List[Article]:
     src_type = source.get("type", "rss")
     if src_type == "rss":
         return crawl_rss(source)
     if src_type == "html":
         return crawl_html(source)
+    if src_type == "json":
+        return crawl_json(source)
     raise ValueError(f"알 수 없는 소스 type: {src_type}")
 
 

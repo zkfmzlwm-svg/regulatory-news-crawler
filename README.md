@@ -107,15 +107,18 @@ Windows PowerShell 에서 저장소 폴더로 이동한 뒤 (한 줄로 입력):
 
 ```powershell
 pip install pyinstaller
-pyinstaller --onefile --windowed --name regulatory-news-crawler --add-data "config;config" --collect-data trafilatura --collect-data justext app.py
+pyinstaller --onefile --windowed --name regulatory-news-crawler --add-data "config;config" --collect-data trafilatura --collect-data justext --collect-all curl_cffi app.py
 ```
 
 - `dist\regulatory-news-crawler.exe` 가 생성되며, 이 파일 하나만 전달하면 더블클릭으로 실행됩니다.
 - 처음 실행하면 exe 옆에 `config/`(사이트 목록·서식), `data/`(수집한 기사 DB), `output/`(요약 파일) 폴더가 자동으로 생깁니다. 사이트 목록을 바꾸려면 exe 옆 `config/sources.yaml` 을 수정하세요.
-- `--add-data`, `--collect-data` 옵션을 빼면 기본 설정이 빠지거나 본문 추출 라이브러리가 동작하지 않아 요약이 실패하니 꼭 포함하세요.
+- 기존 exe 폴더에 예전 `config/sources.yaml` 이 남아 있으면 새 사이트 주소가 반영되지 않습니다. 그 파일을 지우고 실행하면 새 기본값이 복사됩니다(직접 추가한 사이트가 있으면 따로 옮겨 적으세요).
+- `--add-data`, `--collect-data`, `--collect-all curl_cffi` 옵션을 빼면 기본 설정이 빠지거나 본문 추출 라이브러리가 동작하지 않아 요약이 실패하니 꼭 포함하세요.
 
 ## 참고
 
 - 이 프로그램은 API 키나 결제 등록이 전혀 필요 없습니다. "🌍 번역 요약"은 Google 번역의 비공식 무료 엔드포인트를 사용하므로, 가끔 번역이 실패할 수 있습니다(그 경우 해당 문장만 원문 + "(번역 실패)"로 표시되고 나머지는 정상 처리됩니다).
 - "기사 수집"이 끝나면 아래 결과창에 **사이트별 수집 결과**(✔ 성공 건수 / ✖ 실패 사유 / △ 0건)가 표시됩니다. 한 사이트가 막혀도 나머지는 정상 수집됩니다.
+- FDA·TGA 는 봇 차단(Akamai)이 있어 `curl_cffi` 로 실제 브라우저처럼 접속합니다. `pip install -r requirements.txt` 로 꼭 함께 설치하세요(없으면 FDA·TGA 가 HTTP 401/403 으로 실패).
+- FiercePharma 기사 본문과 Endpoints 기사 본문은 각각 Cloudflare 차단·유료 구독벽 때문에 가져올 수 없어, RSS 에 있는 짧은 요약문으로 대신 요약됩니다.
 - ✖ 실패나 △ 0건이 계속되는 사이트는 주소가 바뀌었거나 구조가 맞지 않는 것이니, `config/sources.yaml` 의 URL(또는 html 선택자)을 갱신하세요. 사이트별 결과를 알려주시면 고칠 수 있습니다.
