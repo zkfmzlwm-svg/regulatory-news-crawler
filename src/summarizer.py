@@ -17,7 +17,20 @@ MAX_BULLETS = 5
 _ABBREVIATIONS = [
     "Mr", "Ms", "Mrs", "Dr", "St", "No", "vs", "Inc", "Ltd", "Co", "Corp", "Fig", "approx",
     "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec", "e.g", "i.e",
+    "Ph", "Eur", "Pharm", "Ref", "Vol", "Art", "Sec",
 ]
+
+# 기사 내용이 아닌 사이트 공통 문구 (사진 출처, 보도자료 머리말, 구독 유도, gov.uk 접근성 안내 등)
+_BOILERPLATE = re.compile(
+    r"^(image credit|photo credit|credit:|\(ap photo|\(photo|for immediate release|media inquiries|"
+    r"consumer inquiries|sign up to read|subscribe|already a subscriber|read more|share this|"
+    r"updated monday through friday|this file may not be suitable|request an accessible format|"
+    r"if you use assistive technology|please tell us what format|it will help us if you say|"
+    r"related (articles|links|content)|content current as of|regulated product\(s\)|"
+    r"get free access|create a free account|log ?in to read)",
+    re.IGNORECASE,
+)
+_LIST_MARKER = re.compile(r"^(?:[-–—•*·▪►]\s*)+")
 _SENTENCE_SPLIT = re.compile(
     r"(?<!\.[A-Z]\.)"
     + "".join(rf"(?<!\b{re.escape(a)}\.)" for a in _ABBREVIATIONS)
@@ -61,13 +74,19 @@ def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
     title = clean_text(article.title).lower()
     sentences: List[str] = []
     for para in text.splitlines():
-        para = re.sub(r"\s+", " ", para).strip()
-        # 본문 첫 줄에 반복되는 기사 제목과, 문장이 아닌 짧은 소제목("Background" 등)은 건너뛴다
-        if not para or para.lower() == title:
+        para = _LIST_MARKER.sub("", re.sub(r"\s+", " ", para).strip())
+        # 본문 첫 줄에 반복되는 기사 제목과, 문장이 아닌 짧은 소제목("Background", "What you should do" 등)은 건너뛴다
+        if not para or para.lower() == title or _BOILERPLATE.match(para):
             continue
-        if len(para.split()) < 4 and not para.endswith((".", "!", "?")):
+        if len(para.split()) < 6 and not para.endswith((".", "!", "?")):
             continue
-        sentences.extend(s.strip() for s in _SENTENCE_SPLIT.split(para) if len(s.strip()) >= 3)
+        if para.endswith(":") and len(para.split()) < 10:
+            continue
+        sentences.extend(
+            s.strip()
+            for s in _SENTENCE_SPLIT.split(para)
+            if len(s.strip()) >= 3 and not _BOILERPLATE.match(s.strip())
+        )
         if len(sentences) >= MAX_BULLETS:
             break
     return sentences[:MAX_BULLETS]

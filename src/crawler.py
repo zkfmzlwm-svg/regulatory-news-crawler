@@ -63,10 +63,30 @@ def _default_tag(source: Dict) -> str:
     return source.get("tag") or source["name"].split(" - ")[0].split(" (")[0].strip()
 
 
+def _discover_feed_url(html_bytes: bytes, page_url: str) -> Optional[str]:
+    """HTML 페이지가 돌아왔을 때 <link rel="alternate" type="application/rss+xml"> 로 실제 피드 주소를 찾는다."""
+    soup = BeautifulSoup(html_bytes, "lxml")
+    for link in soup.find_all("link", href=True):
+        rel = " ".join(link.get("rel") or []).lower()
+        typ = (link.get("type") or "").lower()
+        if "alternate" in rel and ("rss" in typ or "atom" in typ):
+            return urljoin(page_url, link["href"])
+    return None
+
+
 def crawl_rss(source: Dict) -> List[Article]:
     name = source["name"]
     resp = http_get(source["url"])
     feed = feedparser.parse(resp.content)
+    base_url = resp.url or source["url"]
+    if not feed.entries:
+        # 사이트 개편으로 피드 주소가 일반 웹페이지로 바뀐 경우, 페이지에 걸린 피드 주소를 따라간다
+        feed_url = _discover_feed_url(resp.content, base_url)
+        if feed_url and feed_url.rstrip("/") != base_url.rstrip("/"):
+            logger.info("[%s] 피드 주소 자동 탐지: %s", name, feed_url)
+            resp = http_get(feed_url)
+            feed = feedparser.parse(resp.content)
+            base_url = resp.url or feed_url
     if not feed.entries and feed.bozo:
         raise ValueError("RSS/Atom 피드 형식이 아닙니다 (URL 확인 필요)")
 
@@ -76,6 +96,9 @@ def crawl_rss(source: Dict) -> List[Article]:
         link = (getattr(entry, "link", "") or "").strip()
         if not title or not link:
             continue
+        link = urljoin(base_url, link)
+        if link.startswith("http://"):
+            link = "https://" + link[len("http://"):]
         published = _normalize_date(
             getattr(entry, "published_parsed", None) or getattr(entry, "published", None)
             or getattr(entry, "updated_parsed", None) or getattr(entry, "updated", None)
@@ -101,7 +124,7 @@ def _date_from_element(el) -> Optional[str]:
 
 def _articles_by_link_pattern(soup, page_url: str, pattern: str, make_article) -> List[Article]:
     """선택자로 기사를 못 찾았을 때, 주소에 pattern 이 들어간 긴 제목 링크들을 기사로 간주."""
-    host = urlparse(page_url).netloc
+    host = urlparse(page_url).netloc.lower().removeprefix("www.")
     page = page_url.rstrip("/")
     articles = []
     for a in soup.find_all("a", href=True):
@@ -109,7 +132,7 @@ def _articles_by_link_pattern(soup, page_url: str, pattern: str, make_article) -
         parsed = urlparse(link)
         title = clean_text(a.get_text(" ", strip=True))
         if (
-            parsed.netloc == host
+            parsed.netloc.lower().removeprefix("www.") == host
             and pattern in parsed.path
             and link.rstrip("/") != page
             and len(title) >= MIN_FALLBACK_TITLE_LEN
@@ -132,7 +155,10 @@ def crawl_html(source: Dict) -> List[Article]:
     if not (item_sel and title_sel) and not link_pattern:
         raise ValueError("html 타입은 selectors.item/title 또는 selectors.link_pattern 이 필요합니다")
 
-    soup = BeautifulSoup(http_get(url).content, "lxml")
+    resp = http_get(url)
+    # www 유무 등으로 리다이렉트되면 최종 주소 기준으로 상대 링크·도메인 비교를 해야 기사를 놓치지 않는다
+    url = resp.url or url
+    soup = BeautifulSoup(resp.content, "lxml")
 
     def make_article(title, link, published, excerpt):
         return Article(
@@ -180,12 +206,66 @@ def crawl_html(source: Dict) -> List[Article]:
     return list(unique.values())
 
 
+def _dig(data, path: str):
+    """"a.b.0.c" 같은 점 경로로 JSON 값을 꺼낸다."""
+    for key in path.split(".") if path else []:
+        if isinstance(data, list):
+            data = data[int(key)] if key.isdigit() and int(key) < len(data) else None
+        elif isinstance(data, dict):
+            data = data.get(key)
+        else:
+            return None
+    return data
+
+
+def crawl_json(source: Dict) -> List[Article]:
+    """RSS 가 없거나 멈춘 사이트의 JSON API (예: WHO 뉴스 API) 에서 기사 목록을 가져온다."""
+    name = source["name"]
+    url = source["url"]
+    fields = source.get("fields", {})
+    title_key = fields.get("title")
+    link_key = fields.get("link")
+    if not (title_key and link_key):
+        raise ValueError("json 타입은 fields.title/link 가 필요합니다")
+    link_prefix = source.get("link_prefix") or url
+
+    resp = http_get(url)
+    items = _dig(resp.json(), fields.get("items", ""))
+    if not isinstance(items, list):
+        raise ValueError("JSON 응답에서 기사 목록(fields.items)을 찾지 못했습니다")
+
+    articles: List[Article] = []
+    for item in items:
+        title = clean_text(str(_dig(item, title_key) or ""))
+        link = str(_dig(item, link_key) or "").strip()
+        if not title or not link:
+            continue
+        if not link.startswith("http"):
+            link = link_prefix.rstrip("/") + "/" + link.lstrip("/")
+        date_key = fields.get("date")
+        summary_key = fields.get("summary")
+        articles.append(
+            Article(
+                source=name,
+                region=source.get("region", ""),
+                tag=_default_tag(source),
+                title=title,
+                url=link,
+                published_at=_normalize_date(str(_dig(item, date_key) or "")) if date_key else None,
+                excerpt=clean_text(str(_dig(item, summary_key) or ""))[:500] if summary_key else "",
+            )
+        )
+    return articles
+
+
 def crawl_source(source: Dict) -> List[Article]:
     src_type = source.get("type", "rss")
     if src_type == "rss":
         return crawl_rss(source)
     if src_type == "html":
         return crawl_html(source)
+    if src_type == "json":
+        return crawl_json(source)
     raise ValueError(f"알 수 없는 소스 type: {src_type}")
 
 

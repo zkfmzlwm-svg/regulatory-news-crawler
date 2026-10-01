@@ -2,6 +2,7 @@
 #
 # type: rss  -> RSS/Atom 피드 URL (feedparser 사용)
 # type: html -> RSS가 없는 사이트를 위한 목록 페이지 스크래핑 (CSS 선택자 필요)
+# type: json -> 뉴스 목록을 JSON 으로 주는 API (fields 로 항목 경로 지정, 예: WHO)
 # tag:  -> 요약 결과 제목에 붙는 "[태그]" 표기 (예: [FDA]). 생략하면 name 앞부분으로 자동 지정
 #
 # 사이트를 추가하려면 `python main.py add-source` 명령을 쓰거나
@@ -40,62 +41,79 @@ sources:
 
   - name: "Health Canada - Recalls & Safety Alerts"
     type: rss
-    url: "https://recalls-rappels.canada.ca/en/feed"
+    url: "https://recalls-rappels.canada.ca/en/feed/health-products-alerts-recalls"
     region: "CA"
     tag: "Health Canada"
     enabled: true
 
   - name: "TGA (Australia) - News"
     type: rss
-    url: "https://www.tga.gov.au/rss.xml"
+    url: "https://www.tga.gov.au/feeds/article/news.xml"
     region: "AU"
     tag: "TGA"
     enabled: true
 
-  - name: "WHO - News"
+  - name: "TGA (Australia) - Safety Alerts"
     type: rss
-    url: "https://www.who.int/rss-feeds/news-english.xml"
+    url: "https://www.tga.gov.au/feeds/alert/safety-alerts.xml"
+    region: "AU"
+    tag: "TGA"
+    enabled: true
+
+  # WHO 공식 RSS(news-english.xml)는 2026년 2월 이후 갱신이 멈춰, 홈페이지가 쓰는 뉴스 API 를 사용
+  - name: "WHO - News"
+    type: json
+    url: "https://www.who.int/api/news/newsitems?sf_culture=en&$orderby=PublicationDateAndTime%20desc&$top=30&$select=Title,ItemDefaultUrl,PublicationDateAndTime"
+    link_prefix: "https://www.who.int/news/item"
     region: "Global"
     tag: "WHO"
     enabled: true
+    fields:
+      items: "value"
+      title: "Title"
+      link: "ItemDefaultUrl"
+      date: "PublicationDateAndTime"
 
+  # RAPS 는 사이트 개편 후 RSS 가 없어져 Regulatory Focus 목록 페이지에서 직접 수집한다
   - name: "RAPS Regulatory Focus"
-    type: rss
-    url: "https://www.raps.org/rss/news"
+    type: html
+    url: "https://www.raps.org/news-insights/regulatory-focus.html?sortBy=recent"
     region: "Global"
     tag: "RAPS"
     enabled: true
+    selectors:
+      item: "article.article-list-item"
+      title: "h4.article-title a"
+      link: "h4.article-title a"
+      date: ".mod-published-date"
+      summary: ".article-teaser"
+      link_pattern: "/resource/"
 
-  - name: "Endpoints News - Regulatory"
+  # endpts.com -> endpoints.news 로 도메인 이전 (regulatory 카테고리 피드는 없어져 전체 피드 사용)
+  - name: "Endpoints News"
     type: rss
-    url: "https://endpts.com/category/regulatory/feed/"
+    url: "https://endpoints.news/feed/"
     region: "Global"
     tag: "Endpoints"
     enabled: true
 
+  # 전체 피드(/rss/xml)는 Cloudflare 챌린지로 막혀 있어 Pharma 섹션 피드를 사용
   - name: "FiercePharma"
     type: rss
-    url: "https://www.fiercepharma.com/rss/xml"
+    url: "https://www.fiercepharma.com/rss/pharma/xml"
     region: "Global"
     tag: "FiercePharma"
     enabled: true
 
   # ---------------- 사용자 지정 사이트 ----------------
+  # 뉴스 목록 페이지는 자바스크립트로 그려져 HTML 에 기사가 없으므로(메뉴 링크만 잡힘),
+  # 그 페이지에 걸려 있는 ECA 공식 뉴스 피드를 사용
   - name: "GMP Compliance - Latest GMP News"
-    type: html
-    url: "https://www.gmp-compliance.org/gmp-news/latest-gmp-news"
+    type: rss
+    url: "https://app.gxp-services.net/eca_newsfeed.xml"
     region: "EU"
     tag: "GMP-Compliance"
     enabled: true
-    # 주의: 이 사이트는 구조를 직접 확인하지 못해 일반적인 뉴스 목록 구조로 추정해 등록했습니다.
-    # item/title 선택자로 못 찾으면 주소에 "/gmp-news/" 가 들어간 긴 제목 링크들을 기사로 수집합니다.
-    # 그래도 0건이면 페이지의 기사 목록 부분 HTML(브라우저 F12 > Elements)을 보내주시면 고쳐드립니다.
-    selectors:
-      item: "article"
-      title: "h2 a, h3 a"
-      link: "h2 a, h3 a"
-      date: "time"
-      link_pattern: "/gmp-news/"
 
   # ---------------- 사이트 추가 예시 (참고용) ----------------
   # - name: "My Custom Source"
