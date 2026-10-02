@@ -5,7 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from .crawler import crawl_all, format_report, load_sources, save_sources
+from . import __version__
+from .crawler import RECENT_DAYS, crawl_all, format_report, load_sources, save_sources
 from .fetcher import fetch_full_text
 from .models import Article
 from .paths import FORMAT_CONFIG as DEFAULT_FORMAT_CONFIG
@@ -30,7 +31,7 @@ def cmd_crawl(args):
     sources = load_sources(args.sources_config)
     store = Storage(Path(args.db))
     report = []
-    articles = crawl_all(sources, only=args.only, report=report)
+    articles = crawl_all(sources, only=args.only, report=report, max_age_days=args.days or None)
     added = store.add_articles(articles)
     print(format_report(report))
     print(f"\n수집 완료: 총 {len(articles)}건 조회, 신규 {added}건 저장 (DB: {args.db})")
@@ -161,12 +162,17 @@ def build_parser() -> argparse.ArgumentParser:
         prog="regulatory-news-crawler",
         description="해외 의약품 규제 뉴스 수집 및 요약 도구",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite DB 경로")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_crawl = sub.add_parser("crawl", help="설정된 사이트에서 기사 수집")
     p_crawl.add_argument("--sources-config", default=str(DEFAULT_SOURCES_CONFIG))
     p_crawl.add_argument("--only", nargs="*", help="특정 소스 이름만 수집")
+    p_crawl.add_argument(
+        "--days", type=int, default=RECENT_DAYS,
+        help=f"최근 N일 이내 발행 기사만 수집 (기본 {RECENT_DAYS}일, 0 이면 제한 없음)",
+    )
     p_crawl.set_defaults(func=cmd_crawl)
 
     p_sources = sub.add_parser("sources", help="등록된 수집 대상 사이트 목록")

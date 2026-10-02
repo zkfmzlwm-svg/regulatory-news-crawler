@@ -7,6 +7,7 @@ from typing import List, Optional
 import yaml
 
 from .models import Article
+from .translate import TranslationError, translate_texts
 from .utils import clean_text, strip_tags
 
 logger = logging.getLogger(__name__)
@@ -99,38 +100,21 @@ def _summarize_fallback(article: Article, full_text: Optional[str]) -> str:
 
 
 def _summarize_free_translate(article: Article, full_text: Optional[str]) -> str:
-    """Anthropic API 키 없이 Google 번역(비공식, 무료)으로 원문 문장을 한국어로 옮긴 요약.
+    """API 키 없이 무료 번역(비공식 Google 번역 등)으로 원문 문장을 한국어로 옮긴 요약.
 
     실제 AI 요약처럼 내용을 재구성/분석하지는 않고 추출한 문장을 그대로 번역만 하므로
     품질은 AI 요약보다 단순하지만, 번역된 한국어 결과를 얻는 데 비용이 들지 않는다.
     """
-    try:
-        from deep_translator import GoogleTranslator
-    except ImportError as exc:
-        raise RuntimeError(
-            "번역 모듈(deep-translator)이 설치되어 있지 않습니다. "
-            "'pip install -r requirements.txt' 를 실행한 뒤 다시 시도하세요."
-        ) from exc
-
     bullets = _extract_sentences(article, full_text)
     if not bullets:
         return "- (본문을 가져오지 못했습니다)"
 
     try:
-        translator = GoogleTranslator(source="auto", target="ko")
-    except Exception as exc:
-        logger.warning("번역기 초기화 실패, 원문으로 대체: %s", exc)
+        translated = translate_texts(bullets, target="ko")
+    except TranslationError as exc:
+        logger.warning("번역 실패, 원문 유지 (%s): %s", article.title, exc)
         return "\n".join(f"- {s} (번역 실패)" for s in bullets)
-
-    lines = []
-    for s in bullets:
-        try:
-            translated = translator.translate(s)
-            lines.append(f"- {translated or s}")
-        except Exception as exc:
-            logger.warning("문장 번역 실패, 원문 유지 (%s): %s", article.title, exc)
-            lines.append(f"- {s} (번역 실패)")
-    return "\n".join(lines)
+    return "\n".join(f"- {t or s}" for s, t in zip(bullets, translated))
 
 
 def summarize_article(article: Article, full_text: Optional[str], mode: str = "free") -> str:
