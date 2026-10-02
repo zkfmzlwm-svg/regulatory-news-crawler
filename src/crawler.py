@@ -2,7 +2,7 @@ import logging
 import re
 from calendar import timegm
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # link_pattern 으로 기사 링크를 찾을 때, 메뉴/카테고리 링크를 거르기 위한 최소 제목 길이
 MIN_FALLBACK_TITLE_LEN = 30
 
+# 수집 대상: 수집 실행 시점 기준 최근 N일 이내 발행된 자료
+RECENT_DAYS = 21
+
 _DOTTED_DATE = re.compile(r"^\s*\d{1,2}\.\d{1,2}\.\d{2,4}")
 
 
@@ -27,6 +30,7 @@ _DOTTED_DATE = re.compile(r"^\s*\d{1,2}\.\d{1,2}\.\d{2,4}")
 class SourceResult:
     name: str
     count: int = 0
+    skipped_old: int = 0
     error: Optional[str] = None
 
 
@@ -274,8 +278,16 @@ def crawl_all(
     only: Optional[List[str]] = None,
     report: Optional[List[SourceResult]] = None,
     progress: Optional[Callable[[int, int, str], None]] = None,
+    max_age_days: Optional[int] = RECENT_DAYS,
 ) -> List[Article]:
-    """모든 사이트를 수집. 한 사이트가 실패해도 나머지는 계속 수집하고, 결과는 report 에 사이트별로 남긴다."""
+    """모든 사이트를 수집. 한 사이트가 실패해도 나머지는 계속 수집하고, 결과는 report 에 사이트별로 남긴다.
+
+    max_age_days 일 이전에 발행된 기사는 제외한다 (None 이면 기간 제한 없음).
+    발행일을 알 수 없는 기사는 판단할 수 없으므로 남겨둔다.
+    """
+    cutoff = None
+    if max_age_days is not None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
     targets = [s for s in sources if s.get("enabled", True) and (not only or s.get("name") in only)]
     all_articles: List[Article] = []
     for i, source in enumerate(targets, start=1):
@@ -285,6 +297,10 @@ def crawl_all(
         result = SourceResult(name=name)
         try:
             found = crawl_source(source)
+            if cutoff:
+                recent = [a for a in found if not a.published_at or a.published_at >= cutoff]
+                result.skipped_old = len(found) - len(recent)
+                found = recent
             result.count = len(found)
             all_articles.extend(found)
             logger.info("[%s] %d건 수집", name, len(found))
@@ -301,8 +317,11 @@ def format_report(report: List[SourceResult]) -> str:
     for r in report:
         if r.error:
             lines.append(f"✖ {r.name}: 실패 ({r.error})")
+        elif r.count == 0 and r.skipped_old:
+            lines.append(f"△ {r.name}: 기간 내 기사 없음 (기간 외 {r.skipped_old}건 제외)")
         elif r.count == 0:
             lines.append(f"△ {r.name}: 0건 (주소나 선택자 확인 필요)")
         else:
-            lines.append(f"✔ {r.name}: {r.count}건")
+            extra = f" (기간 외 {r.skipped_old}건 제외)" if r.skipped_old else ""
+            lines.append(f"✔ {r.name}: {r.count}건{extra}")
     return "\n".join(lines)

@@ -59,16 +59,19 @@ jobs:
       - name: Set release tag
         id: tag
         shell: bash
-        run: echo "tag=build-$(date -u +%Y%m%d)-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+        run: |
+          ver=$(python -c "import src; print(src.__version__)")
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=v$ver-build-$(date -u +%Y%m%d)-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: Windows EXE ${{ steps.tag.outputs.tag }}
+          name: v${{ steps.tag.outputs.version }} (Windows EXE ${{ steps.tag.outputs.tag }})
           body: |
-            Windows 실행 파일 자동 빌드 (커밋 ${{ github.sha }}).
+            버전 v${{ steps.tag.outputs.version }} — Windows 실행 파일 자동 빌드 (커밋 ${{ github.sha }}).
 
             - `regulatory-news-crawler.exe` 를 내려받아 더블클릭하면 실행됩니다.
             - 예전 exe 를 쓰던 폴더라면 exe 옆 `config/sources.yaml` 을 지운 뒤 실행해야 새 사이트 주소가 적용됩니다.

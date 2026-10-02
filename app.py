@@ -7,7 +7,8 @@ from pathlib import Path
 from tkinter import BooleanVar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
-from src.crawler import crawl_all, format_report, load_sources, save_sources
+from src import __version__
+from src.crawler import RECENT_DAYS, crawl_all, format_report, load_sources, save_sources
 from src.fetcher import fetch_full_text
 from src.paths import FORMAT_CONFIG, OUTPUT_DIR, SOURCES_CONFIG, ensure_default_config
 from src.storage import DEFAULT_DB_PATH, Storage
@@ -27,7 +28,7 @@ UI_FONT = ("Malgun Gothic", 10)
 class App(Tk):
     def __init__(self):
         super().__init__()
-        self.title("해외 의약품 규제 뉴스 크롤러")
+        self.title(f"해외 의약품 규제 뉴스 크롤러 v{__version__}")
         self.geometry("1120x760")
         self.minsize(900, 600)
 
@@ -178,7 +179,7 @@ class App(Tk):
     # ---------------- 기사 수집 ----------------
     def start_crawl(self):
         self.crawl_btn.config(state="disabled", text="수집 중...")
-        self.status_var.set("등록된 사이트에서 기사를 가져오는 중...")
+        self.status_var.set(f"등록된 사이트에서 최근 {RECENT_DAYS}일 이내 기사를 가져오는 중...")
         threading.Thread(target=self._crawl_worker, daemon=True).start()
 
     def _crawl_worker(self):
