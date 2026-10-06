@@ -2,6 +2,11 @@
 
 버전 규칙: 0.1 → 0.2 → 0.3 … 순으로 올리며, 공식 사용 전까지는 0.x 로 운영한다.
 
+## v0.3 — 2026-10-06
+
+- 수집 사이트 추가: FDA Map - Blogs (https://www.fdamap.com/blogs.html)
+  - WordPress Blog 카테고리 RSS(`/category/blog/feed/`) 사용, 태그 `[FDAMap]`
+
 ## v0.2 — 2026-10-02
 
 - 무료 번역 요약에서 "Server Error (TooManyRequests)" 로 한국어 번역이 안 되던 문제 수정
