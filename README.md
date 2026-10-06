@@ -98,7 +98,7 @@ python main.py add-source --name "My Site" --url "https://example.com/news" --ty
 ```
 1. [FDA] FDA Approves New Generic Drug Pathway Rule
 - (번역되었거나 원문 그대로인) 문장 불릿...
-- 링크: [원문 제목 | 태그](URL)
+- 링크: URL
 ```
 
 - 번호, `[태그]`(출처), 제목(원문 영문 그대로), 마지막 `- 링크:` 줄은 프로그램이 자동으로 채웁니다.
