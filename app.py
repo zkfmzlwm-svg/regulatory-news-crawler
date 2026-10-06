@@ -4,12 +4,14 @@ import threading
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 from tkinter import BooleanVar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from src import __version__
 from src.crawler import RECENT_DAYS, crawl_all, format_report, load_sources, save_sources
-from src.fetcher import fetch_full_text
+from src.fetcher import fetch_full_text, fetch_page
+from src.models import Article
 from src.paths import FORMAT_CONFIG, OUTPUT_DIR, SOURCES_CONFIG, ensure_default_config
 from src.storage import DEFAULT_DB_PATH, Storage
 from src.summarizer import (
@@ -67,6 +69,20 @@ class App(Tk):
 
         ttk.Button(toolbar, text="검색", command=self.refresh_list).pack(side="left")
         ttk.Button(toolbar, text="사이트 관리", command=self.open_source_manager).pack(side="right")
+
+        url_bar = ttk.Frame(self, padding=(8, 0, 8, 6))
+        url_bar.pack(fill="x")
+        ttk.Label(url_bar, text="웹페이지 주소").pack(side="left")
+        self.url_buttons = [
+            ttk.Button(url_bar, text="🌍 이 페이지 번역 요약", command=lambda: self.start_url_summarize("free")),
+            ttk.Button(url_bar, text="🆓 이 페이지 요약 (영어)", command=lambda: self.start_url_summarize("simple")),
+        ]
+        for btn in self.url_buttons:
+            btn.pack(side="right", padx=(4, 0))
+        self.url_var = StringVar()
+        url_entry = ttk.Entry(url_bar, textvariable=self.url_var)
+        url_entry.pack(side="left", fill="x", expand=True, padx=(4, 4))
+        url_entry.bind("<Return>", lambda e: self.start_url_summarize("free"))
 
         hint = ttk.Label(
             self,
@@ -198,7 +214,7 @@ class App(Tk):
 
     # ---------------- 요약 ----------------
     def _set_summarizing(self, busy: bool):
-        for btn in self.summary_buttons:
+        for btn in self.summary_buttons + self.url_buttons:
             btn.config(state="disabled" if busy else "normal")
 
     def start_summarize(self, mode: str):
@@ -229,6 +245,35 @@ class App(Tk):
             self.store.set_checked(ids, False)
             preview = render_txt(fmt, entries)
             self.task_queue.put(("summarize_done", (preview, output_path, len(entries))))
+        except Exception as exc:
+            self.task_queue.put(("summarize_error", str(exc)))
+
+    def start_url_summarize(self, mode: str):
+        url = self.url_var.get().strip()
+        if not url:
+            messagebox.showinfo("알림", "요약할 웹페이지 주소(URL)를 입력하세요.")
+            return
+        if not url.lower().startswith(("http://", "https://")):
+            url = "https://" + url
+        self._set_summarizing(True)
+        self.status_var.set(f"페이지 가져오는 중: {url}")
+        threading.Thread(target=self._url_summarize_worker, args=(url, mode), daemon=True).start()
+
+    def _url_summarize_worker(self, url, mode):
+        """목록에 없는 개별 웹페이지 주소를 직접 받아 본문을 요약 (DB 에는 저장하지 않음)."""
+        try:
+            fmt = load_format(str(FORMAT_CONFIG))
+            title, full_text = fetch_page(url)
+            if not full_text:
+                raise RuntimeError(f"페이지 본문을 가져오지 못했습니다.\n{url}")
+            article = Article(source=urlparse(url).netloc, title=title or url, url=url)
+            body = summarize_article(article, full_text, mode=mode)
+            entries = [SummaryEntry(index=1, article=article, body=body)]
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = str(OUTPUT_DIR / f"summary_{ts}.{output_extension(fmt)}")
+            write_summaries(fmt, entries, output_path)
+            self.task_queue.put(("url_summarize_done", (render_txt(fmt, entries), output_path)))
         except Exception as exc:
             self.task_queue.put(("summarize_error", str(exc)))
 
@@ -292,6 +337,13 @@ class App(Tk):
             self.result_text.insert("1.0", preview)
             self.selected_ids.clear()
             self.refresh_list()
+        elif kind == "url_summarize_done":
+            preview, output_path = payload
+            self._set_summarizing(False)
+            self.status_var.set(f"페이지 요약 완료 → {output_path}")
+            self.last_output_path = output_path
+            self.result_text.delete("1.0", "end")
+            self.result_text.insert("1.0", preview)
         elif kind == "summarize_error":
             self._set_summarizing(False)
             self.status_var.set("요약 실패")
