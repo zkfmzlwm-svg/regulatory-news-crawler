@@ -3,7 +3,7 @@
 해외 주요 의약품 규제 뉴스를 수집 → 화면에서 원하는 기사만 체크 → 한국어 요약으로 정리해주는 **데스크톱 프로그램**.
 API 키나 별도 서버 없이, `python app.py` 하나로 바로 창이 뜨는 개별 프로그램 형태로 동작합니다.
 
-현재 버전: **v0.3** (변경 내역은 [CHANGELOG.md](CHANGELOG.md))
+현재 버전: **v0.4** (변경 내역은 [CHANGELOG.md](CHANGELOG.md))
 
 ## 버전 관리
 
@@ -13,7 +13,7 @@ API 키나 별도 서버 없이, `python app.py` 하나로 바로 창이 뜨는 
 
 ## 동작 흐름
 
-1. 기사 수집 : `config/sources.yaml` 에 등록된 사이트(FDA, EMA, MHRA, Health Canada, TGA, WHO, RAPS 등 기본 제공 + 직접 추가한 사이트)에서 **수집 실행 시점 기준 최근 21일(3주) 이내 발행된 기사**만 수집해 로컬 DB(`data/articles.db`)에 저장 (발행일을 알 수 없는 기사는 제외하지 않고 포함)
+1. 기사 수집 : `config/sources.yaml` 에 등록된 사이트(FDA, EMA, MHRA, Health Canada, TGA, WHO, RAPS, FDA Map 등 기본 제공 + 직접 추가한 사이트)에서 **수집 실행 시점 기준 최근 21일(3주) 이내 발행된 기사**만 수집해 로컬 DB(`data/articles.db`)에 저장 (발행일을 알 수 없는 기사는 제외하지 않고 포함)
 2. 목록 표에서 원하는 기사의 '선택' 칸을 클릭해 체크
 3. 체크한 기사만 원문을 가져와 요약 생성 (md/txt/docx 파일로 저장 + 화면에도 표시)
 
