@@ -74,6 +74,9 @@ def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
     text = strip_tags(full_text or article.excerpt or "")
     title = clean_text(article.title).lower()
     sentences: List[str] = []
+    if not full_text and title:
+        # 원문이 봇 차단 등으로 안 열리면(예: FiercePharma) RSS 의 제목 + 소개글로 대신 요약한다
+        sentences.append(clean_text(article.title))
     for para in text.splitlines():
         para = _LIST_MARKER.sub("", re.sub(r"\s+", " ", para).strip())
         # 본문 첫 줄에 반복되는 기사 제목과, 문장이 아닌 짧은 소제목("Background", "What you should do" 등)은 건너뛴다
