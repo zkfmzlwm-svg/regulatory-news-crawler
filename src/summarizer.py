@@ -141,7 +141,7 @@ def render_markdown(fmt: SummaryFormat, entries: List[SummaryEntry]) -> str:
         lines.append(f"{e.index}. [{e.tag}] {e.title}")
         if e.body:
             lines.append(e.body)
-        lines.append(f"- 링크: [{e.title} | {e.tag}]({e.article.url})")
+        lines.append(f"- 링크: {e.article.url}")
         lines.append("")
     return "\n".join(lines)
 
@@ -152,7 +152,7 @@ def render_txt(fmt: SummaryFormat, entries: List[SummaryEntry]) -> str:
         lines.append(f"{e.index}. [{e.tag}] {e.title}")
         if e.body:
             lines.append(e.body)
-        lines.append(f"- 링크: {e.title} ({e.tag}) - {e.article.url}")
+        lines.append(f"- 링크: {e.article.url}")
         lines.append("")
     return "\n".join(lines)
 
@@ -211,9 +211,9 @@ def render_docx(fmt: SummaryFormat, entries: List[SummaryEntry], output_path: st
         link_p = doc.add_paragraph()
         link_p.add_run("링크: ")
         try:
-            _add_hyperlink(link_p, e.article.url, f"{e.title} | {e.tag}")
+            _add_hyperlink(link_p, e.article.url, e.article.url)
         except Exception:
-            link_p.add_run(f"{e.title} | {e.tag} ({e.article.url})")
+            link_p.add_run(e.article.url)
     doc.save(output_path)
 
 

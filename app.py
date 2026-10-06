@@ -335,7 +335,6 @@ class App(Tk):
             self.last_output_path = output_path
             self.result_text.delete("1.0", "end")
             self.result_text.insert("1.0", preview)
-            self.selected_ids.clear()
             self.refresh_list()
         elif kind == "url_summarize_done":
             preview, output_path = payload
