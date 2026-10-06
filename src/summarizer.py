@@ -28,7 +28,10 @@ _BOILERPLATE = re.compile(
     r"updated monday through friday|this file may not be suitable|request an accessible format|"
     r"if you use assistive technology|please tell us what format|it will help us if you say|"
     r"related (articles|links|content)|content current as of|regulated product\(s\)|"
-    r"get free access|create a free account|log ?in to read)",
+    r"get free access|create a free account|log ?in to read|"
+    r"an official website of the|here['’]?s how you know|(the )?\.gov means it['’]?s official|"
+    r"federal government websites often end in|before sharing sensitive information|"
+    r"the site is secure|the https:// ensures)",
     re.IGNORECASE,
 )
 _LIST_MARKER = re.compile(r"^(?:[-–—•*·▪►]\s*)+")
