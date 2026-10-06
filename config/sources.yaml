@@ -115,6 +115,14 @@ sources:
     tag: "GMP-Compliance"
     enabled: true
 
+  # blogs.html 은 WordPress 페이지라 Blog 카테고리 전용 RSS 피드를 사용
+  - name: "FDA Map - Blogs"
+    type: rss
+    url: "https://www.fdamap.com/category/blog/feed/"
+    region: "US"
+    tag: "FDAMap"
+    enabled: true
+
   # ---------------- 사이트 추가 예시 (참고용) ----------------
   # - name: "My Custom Source"
   #   type: html
