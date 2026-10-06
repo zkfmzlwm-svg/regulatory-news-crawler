@@ -262,15 +262,26 @@ def crawl_json(source: Dict) -> List[Article]:
     return articles
 
 
+def _exclude_patterns(source: Dict) -> List[str]:
+    value = source.get("exclude_link_pattern") or []
+    return [value] if isinstance(value, str) else [str(v) for v in value]
+
+
 def crawl_source(source: Dict) -> List[Article]:
     src_type = source.get("type", "rss")
     if src_type == "rss":
-        return crawl_rss(source)
-    if src_type == "html":
-        return crawl_html(source)
-    if src_type == "json":
-        return crawl_json(source)
-    raise ValueError(f"알 수 없는 소스 type: {src_type}")
+        articles = crawl_rss(source)
+    elif src_type == "html":
+        articles = crawl_html(source)
+    elif src_type == "json":
+        articles = crawl_json(source)
+    else:
+        raise ValueError(f"알 수 없는 소스 type: {src_type}")
+    # 광고(/sponsored/) 등 주소에 특정 문자열이 든 기사는 수집하지 않는다
+    patterns = _exclude_patterns(source)
+    if patterns:
+        articles = [a for a in articles if not any(p in a.url for p in patterns)]
+    return articles
 
 
 def crawl_all(
