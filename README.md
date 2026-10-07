@@ -121,7 +121,8 @@ python main.py add-source --name "My Site" --url "https://example.com/news" --ty
 2. 상대방이 `pip install -r requirements.txt` 후 `python app.py` 실행
 
 가장 쉬운 방법: GitHub 저장소의 **Releases** 에서 최신 `regulatory-news-crawler.exe` 를 내려받으면 됩니다.
-코드가 바뀌어 push 될 때마다 GitHub Actions(`.github/workflows/build-exe.yml`)가 Windows 에서 자동으로 빌드해 올립니다.
+기본 브랜치에 변경이 머지될 때마다 GitHub Actions(`.github/workflows/build-exe.yml`)가 Windows 에서 자동으로 빌드해 Releases 에 올립니다.
+(작업 브랜치에 push 하면 빌드 확인만 하고 Releases 에는 올리지 않습니다. 그 exe 는 Actions 실행 결과의 Artifacts 에서 받을 수 있습니다)
 (Actions 탭 > "Build Windows EXE" > "Run workflow" 로 수동 빌드도 가능)
 
 직접 빌드하려면 [PyInstaller](https://pyinstaller.org/) 를 씁니다.
