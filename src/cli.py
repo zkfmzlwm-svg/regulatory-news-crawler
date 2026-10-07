@@ -14,7 +14,7 @@ from .paths import OUTPUT_DIR as DEFAULT_OUTPUT_DIR
 from .paths import SOURCES_CONFIG as DEFAULT_SOURCES_CONFIG
 from .storage import DEFAULT_DB_PATH, Storage
 from .summarizer import SummaryEntry, load_format, output_extension, summarize_article, write_summaries
-from .utils import clean_text
+from .utils import clean_text, local_date
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 def _fmt_row(a: Article) -> str:
     check_mark = "[x]" if a.checked else "[ ]"
     sum_mark = "(요약됨)" if a.summarized else ""
-    date = (a.published_at or "")[:10]
+    date = local_date(a.published_at)
     return f"{check_mark} #{a.id:<4} {date:<10} {a.source:<32} {clean_text(a.title)} {sum_mark}"
 
 
@@ -31,7 +31,10 @@ def cmd_crawl(args):
     sources = load_sources(args.sources_config)
     store = Storage(Path(args.db))
     report = []
-    articles = crawl_all(sources, only=args.only, report=report, max_age_days=args.days or None)
+    articles = crawl_all(
+        sources, only=args.only, report=report, max_age_days=args.days or None,
+        last_seen=store.latest_published_by_source(),
+    )
     added = store.add_articles(articles)
     print(format_report(report))
     print(f"\n수집 완료: 총 {len(articles)}건 조회, 신규 {added}건 저장 (DB: {args.db})")
@@ -108,11 +111,15 @@ def _parse_ids(id_args: List[str]) -> List[int]:
             part = part.strip()
             if not part:
                 continue
-            if "-" in part:
-                start, end = part.split("-", 1)
-                ids.extend(range(int(start), int(end) + 1))
-            else:
-                ids.append(int(part))
+            try:
+                if "-" in part:
+                    start, end = part.split("-", 1)
+                    ids.extend(range(int(start), int(end) + 1))
+                else:
+                    ids.append(int(part))
+            except ValueError:
+                print(f"기사 번호 형식이 잘못됐습니다: {part!r} (예: 1,3,5-8)", file=sys.stderr)
+                sys.exit(1)
     return ids
 
 

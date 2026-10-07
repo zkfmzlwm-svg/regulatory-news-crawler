@@ -1,7 +1,7 @@
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from .models import Article
 from .paths import DB_PATH as DEFAULT_DB_PATH
@@ -66,10 +66,12 @@ class Storage:
     def list_articles(
         self,
         source: Optional[str] = None,
+        tag: Optional[str] = None,
         keyword: Optional[str] = None,
         checked_only: bool = False,
         unchecked_only: bool = False,
         summarized: Optional[bool] = None,
+        collected_since: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> List[Article]:
         query = "SELECT * FROM articles WHERE 1=1"
@@ -77,6 +79,9 @@ class Storage:
         if source:
             query += " AND source = ?"
             params.append(source)
+        if tag:
+            query += " AND COALESCE(NULLIF(tag, ''), source) = ?"
+            params.append(tag)
         if keyword:
             query += " AND (title LIKE ? OR excerpt LIKE ?)"
             like = f"%{keyword}%"
@@ -88,6 +93,9 @@ class Storage:
         if summarized is not None:
             query += " AND summarized = ?"
             params.append(1 if summarized else 0)
+        if collected_since:
+            query += " AND collected_at >= ?"
+            params.append(collected_since)
         query += " ORDER BY COALESCE(published_at, collected_at) DESC, id DESC"
         if limit:
             query += " LIMIT ?"
@@ -95,6 +103,26 @@ class Storage:
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_article(r) for r in rows]
+
+    def latest_published_by_source(self) -> Dict[str, str]:
+        """{사이트 이름: 저장된 기사 중 가장 최근 발행일} — 수집 누락 구간 확인용."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT source, MAX(published_at) FROM articles WHERE published_at IS NOT NULL GROUP BY source"
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def count_articles(self) -> int:
+        with self._connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+
+    def list_tags(self) -> List[str]:
+        """목록 화면의 출처 필터용 태그 목록."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT COALESCE(NULLIF(tag, ''), source) FROM articles ORDER BY 1"
+            ).fetchall()
+        return [r[0] for r in rows]
 
     def get_by_ids(self, ids: Iterable[int]) -> List[Article]:
         ids = list(ids)

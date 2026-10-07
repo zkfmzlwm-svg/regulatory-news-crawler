@@ -10,6 +10,12 @@ logger = logging.getLogger(__name__)
 MIN_PRECISE_LEN = 800
 
 
+def _strip_site_name(title: str) -> str:
+    """"Advice on ... | European Medicines Agency (EMA)" 처럼 페이지 제목 뒤에 붙은 사이트 이름을 뗀다."""
+    head, sep, _ = title.rpartition(" | ")
+    return head.strip() if sep and len(head.strip()) >= 15 else title
+
+
 def fetch_full_text(url: str) -> Optional[str]:
     """원문 기사 페이지에서 본문 텍스트를 추출. 실패 시 None."""
     return fetch_page(url)[1]
@@ -29,7 +35,7 @@ def fetch_page(url: str) -> Tuple[Optional[str], Optional[str]]:
     title = None
     try:
         meta = trafilatura.extract_metadata(resp.content, default_url=page_url)
-        title = ((meta.title or "").strip() or None) if meta else None
+        title = (_strip_site_name((meta.title or "").strip()) or None) if meta else None
     except Exception as exc:
         logger.warning("제목 추출 실패 (%s): %s", url, exc)
     text = None

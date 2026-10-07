@@ -13,17 +13,20 @@ from .utils import clean_text, strip_tags
 logger = logging.getLogger(__name__)
 
 MAX_BULLETS = 5
+# 마침표 없이 끝나는 줄이 이 단어 수보다 짧으면 문장이 아니라 소제목·사진 설명 등으로 본다
+_HEADING_MAX_WORDS = 12
 
 # "U.S.", "Jan. 5", "Dr. Smith" 같은 약어 뒤에서는 문장을 자르지 않는다
 _ABBREVIATIONS = [
     "Mr", "Ms", "Mrs", "Dr", "St", "No", "vs", "Inc", "Ltd", "Co", "Corp", "Fig", "approx",
     "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec", "e.g", "i.e",
     "Ph", "Eur", "Pharm", "Ref", "Vol", "Art", "Sec",
+    "Gov", "Sen", "Rep", "Gen", "Jr", "Sr", "Prof", "Dept", "Univ",
 ]
 
 # 기사 내용이 아닌 사이트 공통 문구 (사진 출처, 보도자료 머리말, 구독 유도, gov.uk 접근성 안내 등)
 _BOILERPLATE = re.compile(
-    r"^(image credit|photo credit|credit:|\(ap photo|\(photo|for immediate release|media inquiries|"
+    r"^(image credit|photo credit|credit:|\(ap photo|\(photo|media inquiries|"
     r"consumer inquiries|sign up to read|subscribe|already a subscriber|read more|share this|"
     r"updated monday through friday|this file may not be suitable|request an accessible format|"
     r"if you use assistive technology|please tell us what format|it will help us if you say|"
@@ -31,12 +34,24 @@ _BOILERPLATE = re.compile(
     r"get free access|create a free account|log ?in to read|"
     r"an official website of the|here['’]?s how you know|(the )?\.gov means it['’]?s official|"
     r"federal government websites often end in|before sharing sensitive information|"
-    r"the site is secure|the https:// ensures)",
+    r"the site is secure|the https:// ensures|"
+    # FDA 리콜 페이지 상단 요약표의 항목명이 값과 붙어 나오는 줄 (예: "Recall Reason DescriptionPotential ...")
+    r"recall reason description|brand name\(s\)|product description|"
+    # Health Canada 리콜 페이지의 공통 안내 문구
+    r"verify if your product is affected|contact the (recalling firm|manufacturer)|"
+    r"report any (other )?health product|receive emails about|health products - |"
+    r"consult your health ?care (provider|professional) (prior to|before|if)|"
+    # 사진 설명, RAPS 'Regulatory Recon' 고정 안내 문구
+    r"from l-r|\(l-r\)|regulatory recon is|a story['’]s inclusion in regulatory recon)",
     re.IGNORECASE,
 )
+# 보도자료 머리말: 문단 맨 앞만 떼어내고 뒤의 본문 문장은 살린다
+_RELEASE_PREFIX = re.compile(r"^(?:for\s+)?immediate\s+release\s*[-–—:]*\s*", re.IGNORECASE)
+# 유료 구독벽 등으로 문장 중간에서 잘린 경우 ("... operates …")
+_TRUNCATED = re.compile(r"(?:…|\.\.\.)\s*$")
 _LIST_MARKER = re.compile(r"^(?:[-–—•*·▪►]\s*)+")
 _SENTENCE_SPLIT = re.compile(
-    r"(?<!\.[A-Z]\.)"
+    r"(?<!\.[A-Z]\.)(?<!\b[ap]\.m\.)"
     + "".join(rf"(?<!\b{re.escape(a)}\.)" for a in _ABBREVIATIONS)
     + r"(?<=[.!?])\s+(?=[A-Z0-9\"“‘'(\[])"
 )
@@ -73,6 +88,17 @@ def load_format(config_path: str) -> SummaryFormat:
     )
 
 
+def _is_fragment(sentence: str) -> bool:
+    """목록 항목이 쪼개져 문장 중간부터 시작하는 조각 (예: "prevention, treatment or ..."). "mRNA", "eCTD" 는 문장으로 본다."""
+    return len(sentence) > 1 and sentence[0].islower() and sentence[1].islower()
+
+
+def _is_title(para: str, title: str) -> bool:
+    """본문에 다시 나오는 기사 제목. RSS 제목 뒤에 " - 09/17/2026" 같은 꼬리가 붙은 경우도 같은 제목으로 본다."""
+    low = para.lower()
+    return low == title or (len(low) > 20 and title.startswith(low))
+
+
 def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
     text = strip_tags(full_text or article.excerpt or "")
     title = clean_text(article.title).lower()
@@ -80,23 +106,46 @@ def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
     if not full_text and title:
         # 원문이 봇 차단 등으로 안 열리면(예: FiercePharma) RSS 의 제목 + 소개글로 대신 요약한다
         sentences.append(clean_text(article.title))
+    seen = {s.lower() for s in sentences}
+    truncated: List[str] = []
+    headings: List[str] = []
     for para in text.splitlines():
         para = _LIST_MARKER.sub("", re.sub(r"\s+", " ", para).strip())
+        para = _RELEASE_PREFIX.sub("", para)
         # 본문 첫 줄에 반복되는 기사 제목과, 문장이 아닌 짧은 소제목("Background", "What you should do" 등)은 건너뛴다
-        if not para or para.lower() == title or _BOILERPLATE.match(para):
+        if not para or _is_title(para, title) or _BOILERPLATE.match(para):
             continue
-        if len(para.split()) < 6 and not para.endswith((".", "!", "?")):
+        words = len(para.split())
+        # 회사명("Pharmascience Inc.") 같은 두 단어 이하 줄도 문장이 아니다
+        if words < 3 or (words < 6 and not para.endswith((".", "!", "?"))):
             continue
-        if para.endswith(":") and len(para.split()) < 10:
+        if para.endswith(":") and words < 10:
             continue
-        sentences.extend(
-            s.strip()
-            for s in _SENTENCE_SPLIT.split(para)
-            if len(s.strip()) >= 3 and not _BOILERPLATE.match(s.strip())
-        )
+        # 교육과정·행사 홍보 문구 (예: "With Updates on the new ICH Q1 Guideline!")
+        if para.endswith("!") and words < 10:
+            continue
+        # 시간·날짜·번호만 있는 줄 (예: "9:00 a.m. - 2:00 p.m.")
+        if sum(c.isalpha() for c in para) < len(para) / 2:
+            continue
+        for s in _SENTENCE_SPLIT.split(para):
+            s = s.strip()
+            if len(s) < 3 or _BOILERPLATE.match(s) or _is_fragment(s) or s.lower() in seen:
+                continue
+            seen.add(s.lower())
+            end = s.rstrip("\"”’')]")
+            if end.endswith(":"):  # "These standards replace the following:" 처럼 뒤 목록 없이는 뜻이 없는 문장
+                continue
+            if _TRUNCATED.search(s):
+                truncated.append(s)
+            elif not end.endswith((".", "!")) and len(s.split()) < _HEADING_MAX_WORDS:
+                # 마침표 없는 짧은 줄(소제목·사진 설명·주소·행사 일시)과 짧은 질문형 소제목("What are listed medicines?")
+                headings.append(s)
+            else:
+                sentences.append(s)
         if len(sentences) >= MAX_BULLETS:
             break
-    return sentences[:MAX_BULLETS]
+    # 소제목(헤드라인 모음 기사 등)이나 잘린 문장은 제대로 된 문장이 하나도 없을 때만 쓴다
+    return (sentences or headings or truncated)[:MAX_BULLETS]
 
 
 def _summarize_fallback(article: Article, full_text: Optional[str]) -> str:
