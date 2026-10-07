@@ -1,8 +1,11 @@
+import os
 import queue
 import shutil
+import subprocess
+import sys
 import threading
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from tkinter import BooleanVar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
@@ -22,9 +25,12 @@ from src.summarizer import (
     summarize_article,
     write_summaries,
 )
-from src.utils import clean_text
+from src.utils import clean_text, local_date
 
 UI_FONT = ("Malgun Gothic", 10)
+LIST_LIMIT = 300
+ALL_TAGS = "전체"
+NEW_ROW_COLOR = "#fff4c2"
 
 
 class App(Tk):
@@ -37,8 +43,10 @@ class App(Tk):
         ensure_default_config()
         self.store = Storage(DEFAULT_DB_PATH)
         self.articles = []
+        self.total_count = 0
         self.selected_ids = set()
         self.last_output_path = None
+        self.new_since = None  # 이번 실행에서 마지막 수집을 시작한 시각 (그 뒤로 저장된 기사 = 신규)
         self.task_queue = queue.Queue()
 
         self._build_ui()
@@ -55,9 +63,15 @@ class App(Tk):
 
         ttk.Label(toolbar, text="키워드").pack(side="left")
         self.keyword_var = StringVar()
-        keyword_entry = ttk.Entry(toolbar, textvariable=self.keyword_var, width=20)
+        keyword_entry = ttk.Entry(toolbar, textvariable=self.keyword_var, width=16)
         keyword_entry.pack(side="left", padx=(4, 8))
         keyword_entry.bind("<Return>", lambda e: self.refresh_list())
+
+        ttk.Label(toolbar, text="출처").pack(side="left")
+        self.tag_var = StringVar(value=ALL_TAGS)
+        self.tag_combo = ttk.Combobox(toolbar, textvariable=self.tag_var, state="readonly", width=13)
+        self.tag_combo.pack(side="left", padx=(4, 8))
+        self.tag_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_list())
 
         self.unsummarized_only_var = BooleanVar()
         ttk.Checkbutton(
@@ -66,6 +80,12 @@ class App(Tk):
             variable=self.unsummarized_only_var,
             command=self.refresh_list,
         ).pack(side="left", padx=(0, 8))
+
+        self.new_only_var = BooleanVar()
+        self.new_only_check = ttk.Checkbutton(
+            toolbar, text="신규만", variable=self.new_only_var, command=self.refresh_list, state="disabled"
+        )
+        self.new_only_check.pack(side="left", padx=(0, 8))
 
         ttk.Button(toolbar, text="검색", command=self.refresh_list).pack(side="left")
         ttk.Button(toolbar, text="사이트 관리", command=self.open_source_manager).pack(side="right")
@@ -86,23 +106,38 @@ class App(Tk):
 
         hint = ttk.Label(
             self,
-            text="※ 표의 '선택' 칸을 클릭해 요약할 기사를 고르고, 제목을 더블클릭하면 원문이 브라우저로 열립니다.",
+            text="※ '선택' 칸 클릭 = 선택/해제 ('선택' 제목 = 화면 전체), 제목 더블클릭 = 원문 열기, 노란 줄 = 방금 수집된 신규 기사",
             padding=(8, 0),
             foreground="#555555",
         )
         hint.pack(fill="x")
 
-        list_frame = ttk.Frame(self, padding=8)
+        # 창이 작아도 상태 표시줄이 밀려나지 않도록 목록보다 먼저 아래쪽에 붙인다
+        self.status_var = StringVar(value="준비됨")
+        ttk.Label(self, textvariable=self.status_var, anchor="w", padding=(8, 4)).pack(side="bottom", fill="x")
+
+        # 기사 목록과 결과창 사이 경계선을 끌어서 크기를 조절할 수 있게 한다
+        panes = ttk.Panedwindow(self, orient="vertical")
+        panes.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+
+        list_pane = ttk.Frame(panes)
+        # 선택 건수·요약 버튼 줄은 창이 작아져도 잘리지 않도록 표보다 먼저 아래쪽에 붙인다
+        action_frame = ttk.Frame(list_pane, padding=(0, 6))
+        action_frame.pack(side="bottom", fill="x")
+        list_frame = ttk.Frame(list_pane)
         list_frame.pack(fill="both", expand=True)
 
         columns = ("select", "date", "source", "title", "summarized")
-        self.tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="none")
+        self.tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="none", height=5)
         headers = {"select": "선택", "date": "날짜", "source": "출처", "title": "제목", "summarized": "요약됨"}
-        widths = {"select": 50, "date": 90, "source": 130, "title": 600, "summarized": 60}
+        widths = {"select": 50, "date": 90, "source": 110, "title": 620, "summarized": 60}
         anchors = {"select": "center", "date": "center", "source": "w", "title": "w", "summarized": "center"}
+        stretch = {"title": True}
         for col in columns:
             self.tree.heading(col, text=headers[col])
-            self.tree.column(col, width=widths[col], anchor=anchors[col])
+            self.tree.column(col, width=widths[col], anchor=anchors[col], stretch=stretch.get(col, False))
+        self.tree.heading("select", command=self.toggle_all_visible)
+        self.tree.tag_configure("new", background=NEW_ROW_COLOR)
 
         vsb = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -112,11 +147,9 @@ class App(Tk):
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<Double-1>", self._on_tree_double_click)
 
-        action_frame = ttk.Frame(self, padding=8)
-        action_frame.pack(fill="x")
-
         self.selection_label = ttk.Label(action_frame, text="0건 표시 · 0건 선택됨")
         self.selection_label.pack(side="left")
+        ttk.Button(action_frame, text="선택 모두 해제", command=self.clear_selection).pack(side="left", padx=(12, 0))
 
         self.summary_buttons = [
             ttk.Button(action_frame, text="🌍 번역 요약 (무료)", command=lambda: self.start_summarize("free")),
@@ -124,28 +157,35 @@ class App(Tk):
         ]
         for btn in self.summary_buttons:
             btn.pack(side="right", padx=4)
+        panes.add(list_pane, weight=3)
 
-        result_frame = ttk.LabelFrame(self, text="결과", padding=8)
-        result_frame.pack(fill="both", expand=False, padx=8, pady=(0, 8))
-        self.result_text = ScrolledText(result_frame, height=14, wrap="word", font=UI_FONT)
+        result_frame = ttk.LabelFrame(panes, text="결과", padding=8)
+        self.result_text = ScrolledText(result_frame, height=5, wrap="word", font=UI_FONT)
         self.result_text.pack(fill="both", expand=True)
 
         save_row = ttk.Frame(result_frame)
         save_row.pack(fill="x", pady=(6, 0))
-        ttk.Button(save_row, text="📁 다른 이름으로 저장", command=self.save_as).pack(side="left")
-
-        self.status_var = StringVar(value="준비됨")
-        ttk.Label(self, textvariable=self.status_var, anchor="w", padding=(8, 4)).pack(fill="x")
+        ttk.Button(save_row, text="📋 결과 복사", command=self.copy_result).pack(side="left")
+        ttk.Button(save_row, text="📁 다른 이름으로 저장", command=self.save_as).pack(side="left", padx=(6, 0))
+        ttk.Button(save_row, text="📂 저장 폴더 열기", command=self.open_output_dir).pack(side="left", padx=(6, 0))
+        panes.add(result_frame, weight=1)
+        # 처음에는 기사 목록을 넓게 (경계선은 마우스로 끌어 조절 가능)
+        self.after_idle(lambda: panes.sashpos(0, int(panes.winfo_height() * 0.62)))
 
     # ---------------- 기사 목록 ----------------
     def refresh_list(self):
         keyword = self.keyword_var.get().strip() or None
+        tag = self.tag_var.get()
         self.articles = self.store.list_articles(
             keyword=keyword,
+            tag=None if tag == ALL_TAGS else tag,
             summarized=False if self.unsummarized_only_var.get() else None,
-            limit=300,
+            collected_since=self.new_since if self.new_only_var.get() else None,
+            limit=LIST_LIMIT,
         )
-        self.selected_ids &= {a.id for a in self.articles}
+        self.total_count = self.store.count_articles()
+        self.tag_combo["values"] = [ALL_TAGS] + self.store.list_tags()
+        # 검색어·출처를 바꿔도 앞에서 고른 기사는 계속 선택된 상태로 둔다 (여러 번 검색해 모아서 요약)
         self._render_tree()
 
     def _render_tree(self):
@@ -153,16 +193,47 @@ class App(Tk):
         for a in self.articles:
             mark = "☑" if a.id in self.selected_ids else "☐"
             done = "✅" if a.summarized else ""
+            is_new = self.new_since is not None and a.collected_at >= self.new_since
             self.tree.insert(
                 "",
                 "end",
                 iid=str(a.id),
-                values=(mark, (a.published_at or "")[:10], a.tag or a.source, clean_text(a.title), done),
+                values=(mark, local_date(a.published_at), a.tag or a.source, clean_text(a.title), done),
+                tags=("new",) if is_new else (),
             )
         self._update_selection_label()
 
     def _update_selection_label(self):
-        self.selection_label.config(text=f"{len(self.articles)}건 표시 · {len(self.selected_ids)}건 선택됨")
+        shown = len(self.articles)
+        text = f"{shown}건 표시"
+        if shown >= LIST_LIMIT and self.total_count > shown:
+            text += f" (최근 {LIST_LIMIT}건만)"
+        text += f" · {len(self.selected_ids)}건 선택됨"
+        hidden = len(self.selected_ids - {a.id for a in self.articles})
+        if hidden:
+            text += f" (목록에 안 보이는 {hidden}건 포함)"
+        self.selection_label.config(text=text)
+
+    def _set_selected(self, aid: int, selected: bool):
+        if selected:
+            self.selected_ids.add(aid)
+        else:
+            self.selected_ids.discard(aid)
+        if self.tree.exists(str(aid)):
+            self.tree.set(str(aid), "select", "☑" if selected else "☐")
+
+    def toggle_all_visible(self):
+        """'선택' 제목 클릭: 화면에 보이는 기사를 모두 선택 (이미 모두 선택돼 있으면 모두 해제)."""
+        visible = [a.id for a in self.articles]
+        select = not all(aid in self.selected_ids for aid in visible)
+        for aid in visible:
+            self._set_selected(aid, select)
+        self._update_selection_label()
+
+    def clear_selection(self):
+        for aid in list(self.selected_ids):
+            self._set_selected(aid, False)
+        self._update_selection_label()
 
     def _on_tree_click(self, event):
         if self.tree.identify_region(event.x, event.y) != "cell":
@@ -173,11 +244,7 @@ class App(Tk):
         if not row_id:
             return
         aid = int(row_id)
-        if aid in self.selected_ids:
-            self.selected_ids.discard(aid)
-        else:
-            self.selected_ids.add(aid)
-        self.tree.set(row_id, "select", "☑" if aid in self.selected_ids else "☐")
+        self._set_selected(aid, aid not in self.selected_ids)
         self._update_selection_label()
 
     def _on_tree_double_click(self, event):
@@ -195,6 +262,7 @@ class App(Tk):
     # ---------------- 기사 수집 ----------------
     def start_crawl(self):
         self.crawl_btn.config(state="disabled", text="수집 중...")
+        self.new_since = datetime.now(timezone.utc).isoformat()
         self.status_var.set(f"등록된 사이트에서 최근 {RECENT_DAYS}일 이내 기사를 가져오는 중...")
         threading.Thread(target=self._crawl_worker, daemon=True).start()
 
@@ -206,6 +274,7 @@ class App(Tk):
                 sources,
                 report=report,
                 progress=lambda i, n, name: self.task_queue.put(("crawl_progress", (i, n, name))),
+                last_seen=self.store.latest_published_by_source(),
             )
             added = self.store.add_articles(found)
             self.task_queue.put(("crawl_done", (len(found), added, report)))
@@ -222,6 +291,11 @@ class App(Tk):
             messagebox.showinfo("알림", "표의 '선택' 칸을 클릭해 요약할 기사를 먼저 골라주세요.")
             return
         ids = list(self.selected_ids)
+        hidden = len(self.selected_ids - {a.id for a in self.articles})
+        if hidden and not messagebox.askyesno(
+            "확인", f"지금 목록에 안 보이는 {hidden}건을 포함해 모두 {len(ids)}건을 요약합니다. 계속할까요?"
+        ):
+            return
         self._set_summarizing(True)
         self.status_var.set("요약 준비 중...")
         threading.Thread(target=self._summarize_worker, args=(ids, mode), daemon=True).start()
@@ -277,6 +351,25 @@ class App(Tk):
         except Exception as exc:
             self.task_queue.put(("summarize_error", str(exc)))
 
+    def copy_result(self):
+        text = self.result_text.get("1.0", "end").strip()
+        if not text:
+            messagebox.showinfo("알림", "복사할 결과가 없습니다.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.status_var.set("결과를 클립보드에 복사했습니다 (메일·문서에 붙여넣기 가능)")
+
+    def open_output_dir(self):
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(OUTPUT_DIR)
+            else:
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(OUTPUT_DIR)])
+        except Exception as exc:
+            messagebox.showerror("폴더 열기 실패", f"{OUTPUT_DIR}\n{exc}")
+
     def save_as(self):
         if not self.last_output_path or not Path(self.last_output_path).exists():
             messagebox.showinfo("알림", "먼저 요약을 생성하세요.")
@@ -313,13 +406,18 @@ class App(Tk):
             found, added, report = payload
             failed = sum(1 for r in report if r.error)
             self.crawl_btn.config(state="normal", text="🔄 기사 수집")
+            self.new_only_check.config(state="normal")
             self.status_var.set(
                 f"수집 완료: 조회 {found}건 · 신규 저장 {added}건"
                 + (f" · 실패 {failed}곳 (아래 결과창 참고)" if failed else "")
             )
             self.last_output_path = None
             self.result_text.delete("1.0", "end")
-            self.result_text.insert("1.0", f"[사이트별 수집 결과]\n{format_report(report)}\n")
+            self.result_text.insert(
+                "1.0",
+                f"[사이트별 수집 결과] 신규 {added}건은 목록에 노란색으로 표시됩니다 (위 '신규만' 체크 시 신규만 보기).\n"
+                f"{format_report(report)}\n",
+            )
             self.refresh_list()
         elif kind == "crawl_error":
             self.crawl_btn.config(state="normal", text="🔄 기사 수집")
@@ -336,6 +434,10 @@ class App(Tk):
             self.result_text.delete("1.0", "end")
             self.result_text.insert("1.0", preview)
             self.refresh_list()
+            if self.unsummarized_only_var.get():
+                # '요약 안 한 것만' 화면에서는 방금 요약한 기사가 목록에서 빠지므로 선택도 함께 푼다
+                self.selected_ids &= {a.id for a in self.articles}
+                self._update_selection_label()
         elif kind == "url_summarize_done":
             preview, output_path = payload
             self._set_summarizing(False)
@@ -350,25 +452,32 @@ class App(Tk):
 
 
 class SourceManagerDialog(Toplevel):
-    """수집 대상 RSS 사이트 목록 확인 및 추가 창."""
+    """수집 대상 사이트 목록 확인, 사용/중지, 삭제, RSS 사이트 추가 창."""
 
     def __init__(self, parent: App):
         super().__init__(parent)
         self.title("수집 대상 사이트 관리")
-        self.geometry("680x440")
+        self.geometry("760x480")
         self.transient(parent)
 
         list_frame = ttk.Frame(self, padding=8)
         list_frame.pack(fill="both", expand=True)
-        self.listbox = ttk.Treeview(list_frame, columns=("tag", "name", "url"), show="headings")
-        self.listbox.heading("tag", text="태그")
-        self.listbox.heading("name", text="이름")
-        self.listbox.heading("url", text="URL")
-        self.listbox.column("tag", width=90)
-        self.listbox.column("name", width=200)
-        self.listbox.column("url", width=340)
+        cols = ("enabled", "tag", "name", "type", "url")
+        self.listbox = ttk.Treeview(list_frame, columns=cols, show="headings", selectmode="browse")
+        for col, text, width in (
+            ("enabled", "사용", 45), ("tag", "태그", 90), ("name", "이름", 210), ("type", "종류", 50), ("url", "URL", 330),
+        ):
+            self.listbox.heading(col, text=text)
+            self.listbox.column(col, width=width, anchor="center" if col in ("enabled", "type") else "w")
         self.listbox.pack(fill="both", expand=True)
+        self.listbox.bind("<Double-1>", lambda e: self.toggle_enabled())
         self._load_sources()
+
+        row = ttk.Frame(self, padding=(8, 0))
+        row.pack(fill="x")
+        ttk.Label(row, text="사이트를 고른 뒤 →", foreground="#555555").pack(side="left")
+        ttk.Button(row, text="사용/중지 전환", command=self.toggle_enabled).pack(side="left", padx=4)
+        ttk.Button(row, text="삭제", command=self.delete_source).pack(side="left")
 
         form = ttk.LabelFrame(self, text="RSS 사이트 추가", padding=8)
         form.pack(fill="x", padx=8, pady=8)
@@ -393,8 +502,41 @@ class SourceManagerDialog(Toplevel):
     def _load_sources(self):
         self.listbox.delete(*self.listbox.get_children())
         self.sources = load_sources(str(SOURCES_CONFIG))
-        for s in self.sources:
-            self.listbox.insert("", "end", values=(s.get("tag", ""), s["name"], s["url"]))
+        for i, s in enumerate(self.sources):
+            on = "✔" if s.get("enabled", True) else "–"
+            self.listbox.insert(
+                "", "end", iid=str(i), values=(on, s.get("tag", ""), s["name"], s.get("type", "rss"), s["url"])
+            )
+
+    def _selected_index(self):
+        sel = self.listbox.selection()
+        if not sel:
+            messagebox.showinfo("알림", "목록에서 사이트를 먼저 고르세요.", parent=self)
+            return None
+        return int(sel[0])
+
+    def toggle_enabled(self):
+        i = self._selected_index()
+        if i is None:
+            return
+        src = self.sources[i]
+        src["enabled"] = not src.get("enabled", True)
+        save_sources(str(SOURCES_CONFIG), self.sources)
+        self._load_sources()
+        self.listbox.selection_set(str(i))
+
+    def delete_source(self):
+        i = self._selected_index()
+        if i is None:
+            return
+        name = self.sources[i]["name"]
+        if not messagebox.askyesno(
+            "삭제 확인", f"'{name}' 사이트를 목록에서 삭제할까요?\n(이미 수집한 기사는 그대로 남습니다)", parent=self
+        ):
+            return
+        del self.sources[i]
+        save_sources(str(SOURCES_CONFIG), self.sources)
+        self._load_sources()
 
     def add_source(self):
         name = self.name_var.get().strip()

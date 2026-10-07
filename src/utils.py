@@ -1,5 +1,7 @@
 import html
 import re
+from datetime import datetime
+from typing import Optional
 
 from bs4 import BeautifulSoup
 
@@ -19,3 +21,13 @@ def strip_tags(text: str) -> str:
     if not text:
         return ""
     return html.unescape(_TAG_RE.sub("", text))
+
+
+def local_date(iso: Optional[str]) -> str:
+    """UTC 로 저장된 발행일을 이 컴퓨터 시간대의 날짜(YYYY-MM-DD)로 표시."""
+    if not iso:
+        return ""
+    try:
+        return datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d")
+    except ValueError:
+        return iso[:10]

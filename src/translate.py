@@ -9,6 +9,7 @@
 3. MyMemory — Google 이 모두 막혔을 때의 마지막 대안 (익명 하루 약 5000자)
 """
 import logging
+import re
 import time
 from typing import Callable, List, Optional
 
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = 20
 RETRY_STATUSES = (429, 500, 502, 503, 504)
+# Google 번역 결과에 섞여 나오는 폭 없는 공백 (복사해 붙여넣으면 글자 사이가 이상하게 벌어짐)
+_ZERO_WIDTH = re.compile("[\u200b\u200c\u200d\u2060\ufeff]")
 
 
 class TranslationError(Exception):
@@ -117,7 +120,7 @@ def translate_texts(texts: List[str], target: str = "ko") -> List[str]:
     for backend in order:
         name = backend.__name__.lstrip("_")
         try:
-            result = backend(texts, target)
+            result = [_ZERO_WIDTH.sub("", t) for t in backend(texts, target)]
             _preferred = backend
             return result
         except Exception as exc:

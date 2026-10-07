@@ -74,7 +74,7 @@ jobs:
             버전 v${{ steps.tag.outputs.version }} — Windows 실행 파일 자동 빌드 (커밋 ${{ github.sha }}).
 
             - `regulatory-news-crawler.exe` 를 내려받아 더블클릭하면 실행됩니다.
-            - 예전 exe 를 쓰던 폴더라면 exe 옆 `config/sources.yaml` 을 지운 뒤 실행해야 새 사이트 주소가 적용됩니다.
+            - 예전 exe 를 쓰던 폴더에 덮어써도 됩니다. 기본 사이트 설정은 실행할 때 기존 `config/sources.yaml` 에 자동 반영됩니다 (사용/중지 설정·직접 추가한 사이트는 유지).
           files: |
             dist/regulatory-news-crawler.exe
             dist/regulatory-news-crawler-windows.zip

@@ -24,6 +24,14 @@ MIN_FALLBACK_TITLE_LEN = 30
 RECENT_DAYS = 21
 
 _DOTTED_DATE = re.compile(r"^\s*\d{1,2}\.\d{1,2}\.\d{2,4}")
+# "Health product recall | 2026-10-06", "Updated: October 5, 2026" 처럼 날짜 앞뒤에 글자가 붙은 경우 날짜 부분만 꺼낸다
+_DATE_IN_TEXT = re.compile(
+    r"\d{4}-\d{1,2}-\d{1,2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?"
+    r"|\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{4}"
+    r"|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}"
+)
+# WordPress 피드 요약문 끝에 붙는 "... Read more The post X appeared first on Y." 꼬리
+_EXCERPT_TAIL = re.compile(r"\s*(?:\[(?:…|\.\.\.)\]|(?:…|\.\.\.)\s*Read more\b|The post .+ appeared first on ).*$", re.S)
 
 
 @dataclass
@@ -32,6 +40,8 @@ class SourceResult:
     count: int = 0
     skipped_old: int = 0
     error: Optional[str] = None
+    oldest: Optional[str] = None  # 사이트가 준 목록 중 가장 오래된 발행일
+    gap_from: Optional[str] = None  # 이 날짜 ~ oldest 사이 기사는 목록에 없어 놓쳤을 수 있음
 
 
 def load_sources(config_path: str) -> List[Dict]:
@@ -50,8 +60,7 @@ def _normalize_date(value) -> Optional[str]:
         return None
     try:
         if isinstance(value, str):
-            # 04.03.2025 처럼 점으로 구분된 숫자 날짜는 유럽식(일.월.년)이다
-            dt = dateparser.parse(value, dayfirst=bool(_DOTTED_DATE.match(value)))
+            dt = _parse_date_text(value)
         else:
             dt = datetime.fromtimestamp(timegm(value), tz=timezone.utc)
         if dt is None:
@@ -61,6 +70,21 @@ def _normalize_date(value) -> Optional[str]:
         return dt.astimezone(timezone.utc).isoformat()
     except (ValueError, TypeError, OverflowError):
         return None
+
+
+def _parse_date_text(value: str) -> Optional[datetime]:
+    try:
+        # 04.03.2025 처럼 점으로 구분된 숫자 날짜는 유럽식(일.월.년)이다
+        return dateparser.parse(value, dayfirst=bool(_DOTTED_DATE.match(value)))
+    except (ValueError, OverflowError):
+        m = _DATE_IN_TEXT.search(value)
+        if not m:
+            raise
+        return dateparser.parse(m.group(0))
+
+
+def _clean_excerpt(text: str) -> str:
+    return _EXCERPT_TAIL.sub("", clean_text(text)).strip()[:500]
 
 
 def _default_tag(source: Dict) -> str:
@@ -115,7 +139,7 @@ def crawl_rss(source: Dict) -> List[Article]:
                 title=title,
                 url=link,
                 published_at=published,
-                excerpt=clean_text(getattr(entry, "summary", ""))[:500],
+                excerpt=_clean_excerpt(getattr(entry, "summary", "")),
             )
         )
     return articles
@@ -267,16 +291,45 @@ def _exclude_patterns(source: Dict) -> List[str]:
     return [value] if isinstance(value, str) else [str(v) for v in value]
 
 
-def crawl_source(source: Dict) -> List[Article]:
+def _crawl_page(source: Dict) -> List[Article]:
     src_type = source.get("type", "rss")
     if src_type == "rss":
-        articles = crawl_rss(source)
-    elif src_type == "html":
-        articles = crawl_html(source)
-    elif src_type == "json":
-        articles = crawl_json(source)
-    else:
-        raise ValueError(f"알 수 없는 소스 type: {src_type}")
+        return crawl_rss(source)
+    if src_type == "html":
+        return crawl_html(source)
+    if src_type == "json":
+        return crawl_json(source)
+    raise ValueError(f"알 수 없는 소스 type: {src_type}")
+
+
+def crawl_source(source: Dict, cutoff: Optional[str] = None) -> List[Article]:
+    """사이트 하나를 수집.
+
+    url 에 {page} 가 있으면 pages 쪽수까지 넘겨가며 가져온다 (page_start: 첫 쪽 번호, 기본 1).
+    목록 하나에 최근 몇 건만 나오는 사이트도 수집 기간(cutoff)까지 빠짐없이 모으기 위한 것으로,
+    새 기사가 없는 쪽이 나오거나 cutoff 보다 오래된 기사가 나오면 멈춘다.
+    """
+    url = source["url"]
+    pages = max(1, int(source.get("pages", 1))) if "{page}" in url else 1
+    start = int(source.get("page_start", 1))
+    articles: List[Article] = []
+    seen = set()
+    for page in range(start, start + pages):
+        try:
+            found = _crawl_page(dict(source, url=url.replace("{page}", str(page))))
+        except Exception:
+            if page == start:
+                raise
+            logger.info("[%s] %d쪽 수집 실패, 앞쪽까지만 사용", source.get("name"), page)
+            break
+        new = [a for a in found if a.url not in seen]
+        if not new:
+            break
+        seen.update(a.url for a in new)
+        articles.extend(new)
+        dated = [a.published_at for a in new if a.published_at]
+        if cutoff and dated and min(dated) < cutoff:
+            break
     # 광고(/sponsored/) 등 주소에 특정 문자열이 든 기사는 수집하지 않는다
     patterns = _exclude_patterns(source)
     if patterns:
@@ -290,11 +343,14 @@ def crawl_all(
     report: Optional[List[SourceResult]] = None,
     progress: Optional[Callable[[int, int, str], None]] = None,
     max_age_days: Optional[int] = RECENT_DAYS,
+    last_seen: Optional[Dict[str, str]] = None,
 ) -> List[Article]:
     """모든 사이트를 수집. 한 사이트가 실패해도 나머지는 계속 수집하고, 결과는 report 에 사이트별로 남긴다.
 
     max_age_days 일 이전에 발행된 기사는 제외한다 (None 이면 기간 제한 없음).
     발행일을 알 수 없는 기사는 판단할 수 없으므로 남겨둔다.
+    last_seen 은 {사이트 이름: DB 에 이미 있는 가장 최근 발행일}. 사이트 목록이 최근 몇 건만 보여줘서
+    지난 수집과 이번 수집 사이(또는 수집 기간 앞부분)가 비면 report 의 gap_from 에 표시한다.
     """
     cutoff = None
     if max_age_days is not None:
@@ -307,7 +363,13 @@ def crawl_all(
             progress(i, len(targets), name)
         result = SourceResult(name=name)
         try:
-            found = crawl_source(source)
+            found = crawl_source(source, cutoff)
+            dated = [a.published_at for a in found if a.published_at]
+            result.oldest = min(dated) if dated else None
+            if cutoff and result.oldest and result.oldest > cutoff:
+                prev = (last_seen or {}).get(name)
+                if not prev or prev < result.oldest:
+                    result.gap_from = max(cutoff, prev or "")
             if cutoff:
                 recent = [a for a in found if not a.published_at or a.published_at >= cutoff]
                 result.skipped_old = len(found) - len(recent)
@@ -335,4 +397,13 @@ def format_report(report: List[SourceResult]) -> str:
         else:
             extra = f" (기간 외 {r.skipped_old}건 제외)" if r.skipped_old else ""
             lines.append(f"✔ {r.name}: {r.count}건{extra}")
+        if r.gap_from and not r.error:
+            lines.append(
+                f"   ⚠ 사이트 목록이 최근 기사만 보여줘 {_local_day(r.gap_from)} ~ {_local_day(r.oldest)} 사이 기사는"
+                " 빠졌을 수 있음 (더 자주 수집하면 해결)"
+            )
     return "\n".join(lines)
+
+
+def _local_day(iso: str) -> str:
+    return datetime.fromisoformat(iso).astimezone().strftime("%m-%d")

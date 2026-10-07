@@ -5,6 +5,8 @@
 # type: json -> 뉴스 목록을 JSON 으로 주는 API (fields 로 항목 경로 지정, 예: WHO)
 # tag:  -> 요약 결과 제목에 붙는 "[태그]" 표기 (예: [FDA]). 생략하면 name 앞부분으로 자동 지정
 # exclude_link_pattern: -> 기사 주소에 이 문자열(또는 목록 중 하나)이 들어가면 수집 제외 (예: "/sponsored/")
+# pages / page_start: -> url 에 {page} 를 넣으면 목록을 여러 쪽 넘겨가며 수집 (수집 기간보다 오래된 기사가 나오면 멈춤)
+#                        pages = 최대 쪽수, page_start = 첫 쪽 번호(기본 1, 0부터 세는 사이트는 0)
 #
 # 사이트를 추가하려면 `python main.py add-source` 명령을 쓰거나
 # 이 파일에 직접 항목을 추가하면 됩니다.
@@ -33,19 +35,37 @@ sources:
     tag: "EMA"
     enabled: true
 
+  # 기관 Atom 피드는 최근 20건(약 1주)만 줘서, 같은 내용을 100건까지 주는 GOV.UK 검색 API 를 사용
   - name: "MHRA (UK) - News & Communications"
-    type: rss
-    url: "https://www.gov.uk/government/organisations/medicines-and-healthcare-products-regulatory-agency.atom"
+    type: json
+    url: "https://www.gov.uk/api/search.json?filter_organisations=medicines-and-healthcare-products-regulatory-agency&order=-public_timestamp&count=100&fields=title,link,public_timestamp,description"
+    link_prefix: "https://www.gov.uk"
     region: "UK"
     tag: "MHRA"
     enabled: true
+    exclude_link_pattern: "/government/collections/"   # 문서 묶음(목차) 페이지 제외
+    fields:
+      items: "results"
+      title: "title"
+      link: "link"
+      date: "public_timestamp"
+      summary: "description"
 
+  # RSS 피드(feed/health-products-alerts-recalls)는 최근 3건 정도만 주고 의약품 리콜이 빠져 있어,
+  # 사이트 검색의 '건강 제품(Health products)' 목록을 쪽을 넘겨가며 수집 (한 쪽 15건, 0쪽부터 시작)
   - name: "Health Canada - Recalls & Safety Alerts"
-    type: rss
-    url: "https://recalls-rappels.canada.ca/en/feed/health-products-alerts-recalls"
+    type: html
+    url: "https://recalls-rappels.canada.ca/en/search/site?f%5B0%5D=cat%3A180&page=%2C0%2C{page}"
+    pages: 6
+    page_start: 0
     region: "CA"
     tag: "Health Canada"
     enabled: true
+    selectors:
+      item: "div.search-result"
+      title: "a[href*='/alert-recall/']"
+      link: "a[href*='/alert-recall/']"
+      date: ".ar-type"                 # "Health product recall | 2026-10-06"
 
   - name: "TGA (Australia) - News"
     type: rss
@@ -64,7 +84,7 @@ sources:
   # WHO 공식 RSS(news-english.xml)는 2026년 2월 이후 갱신이 멈춰, 홈페이지가 쓰는 뉴스 API 를 사용
   - name: "WHO - News"
     type: json
-    url: "https://www.who.int/api/news/newsitems?sf_culture=en&$orderby=PublicationDateAndTime%20desc&$top=30&$select=Title,ItemDefaultUrl,PublicationDateAndTime"
+    url: "https://www.who.int/api/news/newsitems?sf_culture=en&$orderby=PublicationDateAndTime%20desc&$top=60&$select=Title,ItemDefaultUrl,PublicationDateAndTime"
     link_prefix: "https://www.who.int/news/item"
     region: "Global"
     tag: "WHO"
@@ -83,7 +103,7 @@ sources:
     tag: "RAPS"
     enabled: true
     selectors:
-      item: "article.article-list-item"
+      item: "article.article-list-item:has(.mod-published-date)"   # 날짜 없는 블록은 스폰서(광고) 기사
       title: "h4.article-title a"
       link: "h4.article-title a"
       date: ".mod-published-date"
