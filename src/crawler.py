@@ -25,10 +25,12 @@ RECENT_DAYS = 21
 
 _DOTTED_DATE = re.compile(r"^\s*\d{1,2}\.\d{1,2}\.\d{2,4}")
 # "Health product recall | 2026-10-06", "Updated: October 5, 2026" 처럼 날짜 앞뒤에 글자가 붙은 경우 날짜 부분만 꺼낸다
+# 마지막 항목은 ".../site48/20260820/123.png" 처럼 주소 안에 붙여 쓴 날짜 (NMPA 뉴스레터 썸네일 업로드일)
 _DATE_IN_TEXT = re.compile(
     r"\d{4}-\d{1,2}-\d{1,2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?"
     r"|\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{4}"
     r"|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}"
+    r"|(?<!\d)(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?!\d)"
 )
 # WordPress 피드 요약문 끝에 붙는 "... Read more The post X appeared first on Y." 꼬리
 _EXCERPT_TAIL = re.compile(r"\s*(?:\[(?:…|\.\.\.)\]|(?:…|\.\.\.)\s*Read more\b|The post .+ appeared first on ).*$", re.S)
@@ -145,7 +147,10 @@ def crawl_rss(source: Dict) -> List[Article]:
     return articles
 
 
-def _date_from_element(el) -> Optional[str]:
+def _date_from_element(el, attr: Optional[str] = None) -> Optional[str]:
+    if attr:
+        # 화면에 날짜가 없는 사이트는 이미지 주소 등 속성 값에 든 날짜를 쓴다 (selectors.date_attr)
+        return _normalize_date(el.get(attr) or "")
     # <time datetime="2025-03-04"> 처럼 기계용 날짜 속성이 있으면 화면 표기보다 우선
     return _normalize_date(el.get("datetime") or el.get_text(strip=True))
 
@@ -177,6 +182,7 @@ def crawl_html(source: Dict) -> List[Article]:
     title_sel = selectors.get("title")
     link_sel = selectors.get("link", title_sel)
     date_sel = selectors.get("date")
+    date_attr = selectors.get("date_attr")
     summary_sel = selectors.get("summary")
     link_pattern = selectors.get("link_pattern")
 
@@ -215,7 +221,7 @@ def crawl_html(source: Dict) -> List[Article]:
             if date_sel:
                 date_el = item.select_one(date_sel)
                 if date_el:
-                    published = _date_from_element(date_el)
+                    published = _date_from_element(date_el, date_attr)
 
             excerpt = ""
             if summary_sel:
@@ -334,6 +340,11 @@ def crawl_source(source: Dict, cutoff: Optional[str] = None) -> List[Article]:
     patterns = _exclude_patterns(source)
     if patterns:
         articles = [a for a in articles if not any(p in a.url for p in patterns)]
+    # "Volume I 2026" 처럼 제목만으로는 무엇인지 모르는 사이트는 앞에 글자를 붙인다
+    prefix = source.get("title_prefix")
+    if prefix:
+        for a in articles:
+            a.title = prefix + a.title
     return articles
 
 

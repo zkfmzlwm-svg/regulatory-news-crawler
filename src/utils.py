@@ -2,6 +2,7 @@ import html
 import re
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -31,3 +32,7 @@ def local_date(iso: Optional[str]) -> str:
         return datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d")
     except ValueError:
         return iso[:10]
+
+
+def is_pdf_url(url: str) -> bool:
+    return urlparse(url or "").path.lower().endswith(".pdf")

@@ -7,6 +7,8 @@
 # exclude_link_pattern: -> 기사 주소에 이 문자열(또는 목록 중 하나)이 들어가면 수집 제외 (예: "/sponsored/")
 # pages / page_start: -> url 에 {page} 를 넣으면 목록을 여러 쪽 넘겨가며 수집 (수집 기간보다 오래된 기사가 나오면 멈춤)
 #                        pages = 최대 쪽수, page_start = 첫 쪽 번호(기본 1, 0부터 세는 사이트는 0)
+# title_prefix: -> 수집한 제목 앞에 붙일 글자 (예: "Volume I 2026" -> "NMPA Newsletter - Volume I 2026")
+# selectors.date_attr: -> html 타입에서 날짜를 글자 대신 date 요소의 속성 값에서 읽음 (예: img 의 src 주소에 든 날짜)
 #
 # 사이트를 추가하려면 `python main.py add-source` 명령을 쓰거나
 # 이 파일에 직접 항목을 추가하면 됩니다.
@@ -145,6 +147,23 @@ sources:
     region: "US"
     tag: "FDAMap"
     enabled: true
+
+  # 뉴스레터 목록은 PDF 링크 + 썸네일뿐이고 발행일 표기가 없어, 썸네일 주소의 업로드일(.../site48/20260820/...)을
+  # 발행일로 쓴다 (PDF 파일 수정일과 일치 확인). 1~2달에 한 번 나오므로 대부분의 수집에서는 '기간 내 기사 없음' 이 정상.
+  # PDF 는 글자가 그림(외곽선)으로 들어 있어 본문 요약은 안 되고, 요약 시 링크 확인 안내만 나온다.
+  - name: "NMPA (China) - Newsletter"
+    type: html
+    url: "https://english.nmpa.gov.cn/newsletter.html"
+    region: "CN"
+    tag: "NMPA"
+    enabled: true
+    title_prefix: "NMPA Newsletter - "
+    selectors:
+      item: "div.news-list li"
+      title: "em"
+      link: "a[href]"
+      date: "img"
+      date_attr: "src"
 
   # ---------------- 사이트 추가 예시 (참고용) ----------------
   # - name: "My Custom Source"
