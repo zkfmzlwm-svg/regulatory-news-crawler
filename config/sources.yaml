@@ -7,6 +7,7 @@
 # exclude_link_pattern: -> 기사 주소에 이 문자열(또는 목록 중 하나)이 들어가면 수집 제외 (예: "/sponsored/")
 # pages / page_start: -> url 에 {page} 를 넣으면 목록을 여러 쪽 넘겨가며 수집 (수집 기간보다 오래된 기사가 나오면 멈춤)
 #                        pages = 최대 쪽수, page_start = 첫 쪽 번호(기본 1, 0부터 세는 사이트는 0)
+# first_page_url: -> 첫 쪽만 주소 규칙이 다른 경우의 첫 쪽 주소 (예: news.html, news_2.html, news_3.html ...)
 # title_prefix: -> 수집한 제목 앞에 붙일 글자 (예: "Volume I 2026" -> "NMPA Newsletter - Volume I 2026")
 # selectors.date_attr: -> html 타입에서 날짜를 글자 대신 date 요소의 속성 값에서 읽음 (예: img 의 src 주소에 든 날짜)
 #
@@ -147,6 +148,39 @@ sources:
     region: "US"
     tag: "FDAMap"
     enabled: true
+
+  # NMPA 영문 사이트: 한 쪽에 6건뿐이라 쪽을 넘겨가며 수집 (첫 쪽은 news.html, 다음 쪽부터 news_2.html ...)
+  # 기사 본문은 일반 웹페이지라 요약 가능
+  - name: "NMPA (China) - News"
+    type: html
+    url: "https://english.nmpa.gov.cn/news_{page}.html"
+    first_page_url: "https://english.nmpa.gov.cn/news.html"
+    pages: 5
+    region: "CN"
+    tag: "NMPA"
+    enabled: true
+    selectors:
+      item: "div.left div.list li"
+      title: "h3.list-tit a"
+      link: "h3.list-tit a"
+      date: "p.list-date"
+      summary: "p.list-desc"
+
+  # 의약품 공고(Announcement)·정책 해설. 몇 달에 한 번 올라오므로 '기간 내 기사 없음'(△) 이 자주 나오는 게 정상
+  - name: "NMPA (China) - Drugs"
+    type: html
+    url: "https://english.nmpa.gov.cn/drugs_{page}.html"
+    first_page_url: "https://english.nmpa.gov.cn/drugs.html"
+    pages: 3
+    region: "CN"
+    tag: "NMPA"
+    enabled: true
+    selectors:
+      item: "div.left div.list li"
+      title: "h3.list-tit a"
+      link: "h3.list-tit a"
+      date: "p.list-date"
+      summary: "p.list-desc"
 
   # 뉴스레터 목록은 PDF 링크 + 썸네일뿐이고 발행일 표기가 없어, 썸네일 주소의 업로드일(.../site48/20260820/...)을
   # 발행일로 쓴다 (PDF 파일 수정일과 일치 확인). 1~2달에 한 번 나오므로 대부분의 수집에서는 '기간 내 기사 없음' 이 정상.

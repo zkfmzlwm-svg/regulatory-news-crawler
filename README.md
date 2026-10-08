@@ -13,7 +13,7 @@ API 키나 별도 서버 없이, `python app.py` 하나로 바로 창이 뜨는 
 
 ## 동작 흐름
 
-1. 기사 수집 : `config/sources.yaml` 에 등록된 사이트(FDA, EMA, MHRA, Health Canada, TGA, WHO, RAPS, FDA Map, NMPA 뉴스레터 등 기본 제공 + 직접 추가한 사이트)에서 **수집 실행 시점 기준 최근 21일(3주) 이내 발행된 기사**만 수집해 로컬 DB(`data/articles.db`)에 저장 (발행일을 알 수 없는 기사는 제외하지 않고 포함)
+1. 기사 수집 : `config/sources.yaml` 에 등록된 사이트(FDA, EMA, MHRA, Health Canada, TGA, WHO, RAPS, FDA Map, NMPA(중국) 뉴스·의약품 공고·뉴스레터 등 기본 제공 + 직접 추가한 사이트)에서 **수집 실행 시점 기준 최근 21일(3주) 이내 발행된 기사**만 수집해 로컬 DB(`data/articles.db`)에 저장 (발행일을 알 수 없는 기사는 제외하지 않고 포함)
    - 일부 사이트(FDA What's New, RAPS, Endpoints, GMP Compliance)는 목록에 최근 몇십 건만 보여줘서, 오래 수집하지 않으면 그 사이 기사가 빠질 수 있습니다. 이런 경우 수집 결과에 `⚠ … 사이 기사는 빠졌을 수 있음` 으로 표시되니 **며칠에 한 번(FDA 는 가능하면 매일) 수집**하세요. 한 번 수집한 기사는 DB 에 계속 남습니다.
 2. 목록 표에서 원하는 기사의 '선택' 칸을 클릭해 체크
 3. 체크한 기사만 원문을 가져와 요약 생성 (md/txt/docx 파일로 저장 + 화면에도 표시)
@@ -98,6 +98,7 @@ python main.py add-source --name "My Site" --url "https://example.com/news" --ty
 
 목록이 여러 쪽으로 나뉜 사이트는 url 에 `{page}` 를 넣고 `pages`(최대 쪽수), `page_start`(첫 쪽 번호, 기본 1)를 지정하면
 수집 기간(21일)보다 오래된 기사가 나올 때까지 쪽을 넘겨가며 수집합니다 (예: Health Canada 설정 참고).
+첫 쪽만 주소 규칙이 다른 사이트(`news.html`, `news_2.html` …)는 `first_page_url` 에 첫 쪽 주소를 따로 적습니다 (예: NMPA 설정 참고).
 
 ## 요약 서식
 

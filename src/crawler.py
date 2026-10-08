@@ -312,17 +312,20 @@ def crawl_source(source: Dict, cutoff: Optional[str] = None) -> List[Article]:
     """사이트 하나를 수집.
 
     url 에 {page} 가 있으면 pages 쪽수까지 넘겨가며 가져온다 (page_start: 첫 쪽 번호, 기본 1).
+    첫 쪽 주소만 규칙이 다른 사이트(news.html, news_2.html ...)는 first_page_url 로 첫 쪽 주소를 따로 준다.
     목록 하나에 최근 몇 건만 나오는 사이트도 수집 기간(cutoff)까지 빠짐없이 모으기 위한 것으로,
     새 기사가 없는 쪽이 나오거나 cutoff 보다 오래된 기사가 나오면 멈춘다.
     """
     url = source["url"]
     pages = max(1, int(source.get("pages", 1))) if "{page}" in url else 1
     start = int(source.get("page_start", 1))
+    first_url = source.get("first_page_url")
     articles: List[Article] = []
     seen = set()
     for page in range(start, start + pages):
+        page_url = first_url if page == start and first_url else url.replace("{page}", str(page))
         try:
-            found = _crawl_page(dict(source, url=url.replace("{page}", str(page))))
+            found = _crawl_page(dict(source, url=page_url))
         except Exception:
             if page == start:
                 raise
