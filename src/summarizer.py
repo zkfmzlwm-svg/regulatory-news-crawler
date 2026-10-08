@@ -8,7 +8,7 @@ import yaml
 
 from .models import Article
 from .translate import TranslationError, translate_texts
-from .utils import clean_text, strip_tags
+from .utils import clean_text, is_pdf_url, strip_tags
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +179,9 @@ def summarize_article(article: Article, full_text: Optional[str], mode: str = "f
       - "simple": 번역 없이 원문 문장을 그대로 추출
       - "free": Google 번역(비공식, 무료)으로 문장을 한국어로 번역
     """
+    if not full_text and not article.excerpt and is_pdf_url(article.url):
+        # 제목 한 줄만 번역해 보여주는 것보다 원문을 직접 열어보라고 안내 (예: NMPA 뉴스레터)
+        return "- (PDF 문서라 본문을 자동으로 요약할 수 없습니다. 링크에서 직접 확인하세요)"
     if mode == "simple":
         return _summarize_fallback(article, full_text)
     return _summarize_free_translate(article, full_text)

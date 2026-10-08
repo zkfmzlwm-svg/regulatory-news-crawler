@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 import trafilatura
 
 from .net import http_get
+from .utils import is_pdf_url
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +24,18 @@ def fetch_full_text(url: str) -> Optional[str]:
 
 def fetch_page(url: str) -> Tuple[Optional[str], Optional[str]]:
     """페이지의 (제목, 본문 텍스트)를 추출. 실패한 항목은 None."""
+    # PDF 는 웹페이지 본문 추출기로 읽을 수 없어(바이너리가 그대로 본문이 됨) 내려받지 않는다.
+    # NMPA 뉴스레터처럼 한 파일이 수십 MB 인 경우도 있다.
+    if is_pdf_url(url):
+        logger.info("PDF 문서는 본문을 추출하지 않음 (%s)", url)
+        return None, None
     try:
         resp = http_get(url)
     except Exception as exc:
         logger.warning("본문 다운로드 실패 (%s): %s", url, exc)
+        return None, None
+    if resp.content[:5] == b"%PDF-":
+        logger.info("PDF 문서는 본문을 추출하지 않음 (%s)", url)
         return None, None
 
     # resp.text 는 헤더에 charset 이 없으면 ISO-8859-1 로 잘못 디코딩해 글자가 깨지므로,

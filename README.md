@@ -3,7 +3,7 @@
 해외 주요 의약품 규제 뉴스를 수집 → 화면에서 원하는 기사만 체크 → 한국어 요약으로 정리해주는 **데스크톱 프로그램**.
 API 키나 별도 서버 없이, `python app.py` 하나로 바로 창이 뜨는 개별 프로그램 형태로 동작합니다.
 
-현재 버전: **v0.6** (변경 내역은 [CHANGELOG.md](CHANGELOG.md))
+현재 버전: **v0.7** (변경 내역은 [CHANGELOG.md](CHANGELOG.md))
 
 ## 버전 관리
 
@@ -13,7 +13,7 @@ API 키나 별도 서버 없이, `python app.py` 하나로 바로 창이 뜨는 
 
 ## 동작 흐름
 
-1. 기사 수집 : `config/sources.yaml` 에 등록된 사이트(FDA, EMA, MHRA, Health Canada, TGA, WHO, RAPS, FDA Map 등 기본 제공 + 직접 추가한 사이트)에서 **수집 실행 시점 기준 최근 21일(3주) 이내 발행된 기사**만 수집해 로컬 DB(`data/articles.db`)에 저장 (발행일을 알 수 없는 기사는 제외하지 않고 포함)
+1. 기사 수집 : `config/sources.yaml` 에 등록된 사이트(FDA, EMA, MHRA, Health Canada, TGA, WHO, RAPS, FDA Map, NMPA(중국) 뉴스·의약품 공고·뉴스레터 등 기본 제공 + 직접 추가한 사이트)에서 **수집 실행 시점 기준 최근 21일(3주) 이내 발행된 기사**만 수집해 로컬 DB(`data/articles.db`)에 저장 (발행일을 알 수 없는 기사는 제외하지 않고 포함)
    - 일부 사이트(FDA What's New, RAPS, Endpoints, GMP Compliance)는 목록에 최근 몇십 건만 보여줘서, 오래 수집하지 않으면 그 사이 기사가 빠질 수 있습니다. 이런 경우 수집 결과에 `⚠ … 사이 기사는 빠졌을 수 있음` 으로 표시되니 **며칠에 한 번(FDA 는 가능하면 매일) 수집**하세요. 한 번 수집한 기사는 DB 에 계속 남습니다.
 2. 목록 표에서 원하는 기사의 '선택' 칸을 클릭해 체크
 3. 체크한 기사만 원문을 가져와 요약 생성 (md/txt/docx 파일로 저장 + 화면에도 표시)
@@ -98,6 +98,7 @@ python main.py add-source --name "My Site" --url "https://example.com/news" --ty
 
 목록이 여러 쪽으로 나뉜 사이트는 url 에 `{page}` 를 넣고 `pages`(최대 쪽수), `page_start`(첫 쪽 번호, 기본 1)를 지정하면
 수집 기간(21일)보다 오래된 기사가 나올 때까지 쪽을 넘겨가며 수집합니다 (예: Health Canada 설정 참고).
+첫 쪽만 주소 규칙이 다른 사이트(`news.html`, `news_2.html` …)는 `first_page_url` 에 첫 쪽 주소를 따로 적습니다 (예: NMPA 설정 참고).
 
 ## 요약 서식
 
@@ -143,5 +144,6 @@ pyinstaller --onefile --windowed --name regulatory-news-crawler --add-data "conf
 - 이 프로그램은 API 키나 결제 등록이 전혀 필요 없습니다. "🌍 번역 요약"은 무료 번역 엔드포인트(Google 비공식 2곳 → MyMemory)를 차례로 시도하며, 하나가 차단되면 자동으로 다음 것을 씁니다. 모두 실패하면 해당 기사만 원문 + "(번역 실패)"로 표시되고 나머지는 정상 처리됩니다.
 - "기사 수집"이 끝나면 아래 결과창에 **사이트별 수집 결과**(✔ 성공 건수 / ✖ 실패 사유 / △ 0건 / ⚠ 누락 가능 구간)가 표시됩니다. 한 사이트가 막혀도 나머지는 정상 수집됩니다.
 - FDA·TGA 는 봇 차단(Akamai)이 있어 `curl_cffi` 로 실제 브라우저처럼 접속합니다. `pip install -r requirements.txt` 로 꼭 함께 설치하세요(없으면 FDA·TGA 가 HTTP 401/403 으로 실패).
+- NMPA(중국) 뉴스레터는 1~2달에 한 번 나오는 PDF 라 평소에는 △ '기간 내 기사 없음' 이 정상입니다. PDF 안의 글자가 그림(외곽선)으로 되어 있어 본문 요약은 되지 않고, 요약하면 링크에서 직접 확인하라는 안내만 나옵니다.
 - FiercePharma 기사 본문과 Endpoints 기사 본문은 각각 Cloudflare 차단·유료 구독벽 때문에 가져올 수 없어, RSS 에 있는 짧은 요약문으로 대신 요약됩니다.
 - ✖ 실패나 △ 0건이 계속되는 사이트는 주소가 바뀌었거나 구조가 맞지 않는 것이니, `config/sources.yaml` 의 URL(또는 html 선택자)을 갱신하세요. 사이트별 결과를 알려주시면 고칠 수 있습니다.
