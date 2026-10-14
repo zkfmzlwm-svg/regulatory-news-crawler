@@ -88,13 +88,22 @@ def _gtx(texts: List[str], target: str) -> List[str]:
     return out
 
 
+def _source_lang(text: str) -> str:
+    """MyMemory 는 원문 언어를 지정해야 해서 글자로 짐작한다 (Google 은 자동 감지)."""
+    if re.search(r"[\u3040-\u30ff]", text):
+        return "ja"
+    if re.search(r"[\u4e00-\u9fff]", text):
+        return "zh-CN"
+    return "en"
+
+
 def _mymemory(texts: List[str], target: str) -> List[str]:
     out = []
     for t in texts:
         resp = _call(
             "GET",
             "https://api.mymemory.translated.net/get",
-            params={"q": t[:500], "langpair": f"en|{target}"},
+            params={"q": t[:500], "langpair": f"{_source_lang(t)}|{target}"},
         )
         data = resp.json()
         translated = (data.get("responseData") or {}).get("translatedText") or ""
