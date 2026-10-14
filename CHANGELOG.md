@@ -2,6 +2,13 @@
 
 버전 규칙: 0.1 → 0.2 → 0.3 … 순으로 올리며, 공식 사용 전까지는 0.x 로 운영한다.
 
+## v0.9 — 2026-10-14
+
+- 수집 사이트 추가: ICH - News / ICH - Press Releases, 태그 `[ICH]`
+  - ICH 사이트(www.ich.org)는 자바스크립트로 그려져 RSS·HTML 목록이 없어, 사이트가 쓰는 API(`admin.ich.org/api/v1/nodes`) 사용
+  - 기사 본문도 같은 API 에서 가져와 요약 (페이지 HTML 에는 본문이 없음)
+  - News 는 한 달 2~3건, Press Releases 는 총회 때 1년 2번 정도
+
 ## v0.8 — 2026-10-14
 
 - 수집 사이트 추가: PMDA (Japan) - What's New (`https://www.pmda.go.jp/rss_008.xml`, 영문), 태그 `[PMDA]`
