@@ -343,6 +343,15 @@ def crawl_source(source: Dict, cutoff: Optional[str] = None) -> List[Article]:
     patterns = _exclude_patterns(source)
     if patterns:
         articles = [a for a in articles if not any(p in a.url for p in patterns)]
+    # MHLW 처럼 노동·연금 소식까지 한 피드에 섞인 사이트는 제목에 이 패턴(정규식)이 든 기사만 남긴다
+    include = source.get("include_title_pattern")
+    if include:
+        articles = [a for a in articles if re.search(include, a.title)]
+    # PMDA 제목 앞의 내부 분류 꼬리표("[SHINSA]" 등)처럼 필요 없는 부분을 지운다
+    remove = source.get("title_remove_pattern")
+    if remove:
+        for a in articles:
+            a.title = re.sub(remove, "", a.title).strip() or a.title
     # "Volume I 2026" 처럼 제목만으로는 무엇인지 모르는 사이트는 앞에 글자를 붙인다
     prefix = source.get("title_prefix")
     if prefix:

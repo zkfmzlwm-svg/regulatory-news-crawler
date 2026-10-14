@@ -42,19 +42,56 @@ _BOILERPLATE = re.compile(
     r"report any (other )?health product|receive emails about|health products - |"
     r"consult your health ?care (provider|professional) (prior to|before|if)|"
     # 사진 설명, RAPS 'Regulatory Recon' 고정 안내 문구
-    r"from l-r|\(l-r\)|regulatory recon is|a story['’]s inclusion in regulatory recon)",
+    r"from l-r|\(l-r\)|regulatory recon is|a story['’]s inclusion in regulatory recon|"
+    # PMDA 영문 사이트 공통 안내 (자바스크립트·기계번역 안내, 영문 번역본 면책 문구)
+    r"please make javascript on|please note that this site may not be accurate|"
+    r"the following english translations? |in the event of inconsistency between the japanese|"
+    r"pmda shall not be responsible|the review reports? (were selected|contains)|"
+    # MHLW 공통 문구 (문의처·전화번호, 자바스크립트·자동번역·PDF 뷰어 안내, 보도자료 수신인)
+    r"照会先|[（(](代表|直通)電話[）)]|報道関係者\s*各位|このページではjavascript|"
+    r"このホームページを、英語|pdfファイルを見るためには|※?スパムメール防止のため|(?:お手数ですが|恐れ入りますが)、送信)",
     re.IGNORECASE,
 )
 # 보도자료 머리말: 문단 맨 앞만 떼어내고 뒤의 본문 문장은 살린다
 _RELEASE_PREFIX = re.compile(r"^(?:for\s+)?immediate\s+release\s*[-–—:]*\s*", re.IGNORECASE)
 # 유료 구독벽 등으로 문장 중간에서 잘린 경우 ("... operates …")
 _TRUNCATED = re.compile(r"(?:…|\.\.\.)\s*$")
-_LIST_MARKER = re.compile(r"^(?:[-–—•*·▪►]\s*)+")
+_LIST_MARKER = re.compile(r"^(?:[-–—•*·▪►・▶●○■◆]\s*)+")
 _SENTENCE_SPLIT = re.compile(
     r"(?<!\.[A-Z]\.)(?<!\b[ap]\.m\.)"
     + "".join(rf"(?<!\b{re.escape(a)}\.)" for a in _ABBREVIATIONS)
     + r"(?<=[.!?])\s+(?=[A-Z0-9\"“‘'(\[])"
 )
+
+
+# 일본어(가나·한자) 본문: 띄어쓰기가 없어 단어 수 대신 글자 수로 판단하고 "。" 에서 문장을 나눈다
+_CJK_CHAR = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_CJK_SENTENCE_SPLIT = re.compile(r"(?<=[。！？])")
+_CJK_END = ("。", "！", "？")
+# 마침표 없는 일본어 줄이 이보다 짧으면 부서명·일시·번호 붙은 항목명 등이라 버리고, 이보다 길면 소제목으로 둔다
+_CJK_MIN_CHARS = 15
+# 한 문장이 여러 줄로 끊겨 있는 경우(보도자료 PDF 를 옮긴 페이지) 이어 붙일 앞줄의 최소 길이
+_CJK_WRAP_MIN_CHARS = 30
+_CJK_LINE_START_MARKER = re.compile(r"^[・▶●○■◆※【（(０-９0-9]")
+# 담당자 연락처 줄 (예: "予防接種課 課長補佐 幕内（8157）")
+_JP_CONTACT = re.compile(r"[（(](?:内線)?\s*[0-9０-９]{4}\s*[）)]")
+# 문장 중간에서 끊긴 줄은 대개 조사·어미(히라가나)나 쉼표로 끝난다. 명사로 끝나는 줄은 소제목으로 보고 잇지 않는다
+_CJK_CONTINUES = re.compile(r"[\u3041-\u309f、，]$")
+# 일본 연호: Google 번역이 "令和８年度" 를 "2017년" 처럼 틀리게 옮겨, 번역 전에 서기로 바꾼다
+_JP_ERA = re.compile(r"(令和|平成)\s*([0-9０-９]+|元)\s*年")
+_JP_ERA_BASE = {"令和": 2018, "平成": 1988}
+
+
+def _to_western_year(text: str) -> str:
+    return _JP_ERA.sub(lambda m: f"{_JP_ERA_BASE[m.group(1)] + (1 if m.group(2) == '元' else int(m.group(2)))}年", text)
+
+
+def _is_cjk(text: str) -> bool:
+    return len(_CJK_CHAR.findall(text)) * 3 >= len(text)
+
+
+def _has_cjk(text: str) -> bool:
+    return bool(_CJK_CHAR.search(text))
 
 
 @dataclass
@@ -99,6 +136,40 @@ def _is_title(para: str, title: str) -> bool:
     return low == title or (len(low) > 20 and title.startswith(low))
 
 
+def _join_wrapped_cjk(paras: List[str], title: str) -> List[str]:
+    """일본어 문장이 중간에서 줄바꿈된 경우 ("…広報啓発を" / "推進してまいります。") 한 줄로 잇는다."""
+    out: List[str] = []
+    for para in paras:
+        prev = out[-1] if out else ""
+        if (
+            len(prev) >= _CJK_WRAP_MIN_CHARS
+            and _is_cjk(prev)
+            and _CJK_CONTINUES.search(prev)
+            and not _is_title(prev, title)
+            and para
+            and _is_cjk(para)
+            and not _CJK_LINE_START_MARKER.match(para)
+        ):
+            out[-1] = prev + para
+        else:
+            out.append(para)
+    return out
+
+
+def _cjk_sentences(para: str):
+    """일본어 문단을 (문장, 소제목) 으로 나눈다. 문장이 아닌 짧은 줄은 둘 다 아님."""
+    sentences, headings = [], []
+    for s in _CJK_SENTENCE_SPLIT.split(para):
+        s = s.strip()
+        if len(s) < 10:  # "「一瞬の判断。" 처럼 따옴표 안에서 끊긴 조각
+            continue
+        if s.endswith(_CJK_END):
+            sentences.append(s)
+        elif len(s) >= _CJK_MIN_CHARS:
+            headings.append(s)
+    return sentences, headings
+
+
 def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
     text = strip_tags(full_text or article.excerpt or "")
     title = clean_text(article.title).lower()
@@ -109,11 +180,25 @@ def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
     seen = {s.lower() for s in sentences}
     truncated: List[str] = []
     headings: List[str] = []
-    for para in text.splitlines():
-        para = _LIST_MARKER.sub("", re.sub(r"\s+", " ", para).strip())
+    paras = [_LIST_MARKER.sub("", re.sub(r"\s+", " ", p).strip()) for p in text.splitlines()]
+    if _has_cjk(text):
+        paras = _join_wrapped_cjk(paras, title)
+    for para in paras:
         para = _RELEASE_PREFIX.sub("", para)
         # 본문 첫 줄에 반복되는 기사 제목과, 문장이 아닌 짧은 소제목("Background", "What you should do" 등)은 건너뛴다
         if not para or _is_title(para, title) or _BOILERPLATE.match(para):
+            continue
+        if _is_cjk(para):
+            if _JP_CONTACT.search(para):
+                continue
+            found, heads = _cjk_sentences(para)
+            for x in found:
+                if x not in seen:
+                    seen.add(x)
+                    sentences.append(x)
+            headings.extend(heads)
+            if len(sentences) >= MAX_BULLETS:
+                break
             continue
         words = len(para.split())
         # 회사명("Pharmascience Inc.") 같은 두 단어 이하 줄도 문장이 아니다
@@ -145,7 +230,11 @@ def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
         if len(sentences) >= MAX_BULLETS:
             break
     # 소제목(헤드라인 모음 기사 등)이나 잘린 문장은 제대로 된 문장이 하나도 없을 때만 쓴다
-    return (sentences or headings or truncated)[:MAX_BULLETS]
+    result = (sentences or headings or truncated)[:MAX_BULLETS]
+    if not result and full_text:
+        # 본문이 PDF 링크 목록뿐인 페이지(PMDA·MHLW 자료 게시 페이지 등)는 제목 + 소개글로 대신한다
+        return _extract_sentences(article, None)
+    return result
 
 
 def _summarize_fallback(article: Article, full_text: Optional[str]) -> str:
@@ -164,12 +253,19 @@ def _summarize_free_translate(article: Article, full_text: Optional[str]) -> str
     if not bullets:
         return "- (본문을 가져오지 못했습니다)"
 
+    # 일본어 제목(MHLW 등)은 요약 제목 줄에 원문 그대로 나가므로, 번역한 제목을 첫 줄에 붙인다
+    title = clean_text(article.title)
+    with_title = _has_cjk(title) and title not in bullets
+    texts = [_to_western_year(t) for t in ([title] if with_title else []) + bullets]
     try:
-        translated = translate_texts(bullets, target="ko")
+        translated = translate_texts(texts, target="ko")
     except TranslationError as exc:
         logger.warning("번역 실패, 원문 유지 (%s): %s", article.title, exc)
         return "\n".join(f"- {s} (번역 실패)" for s in bullets)
-    return "\n".join(f"- {t or s}" for s, t in zip(bullets, translated))
+    lines = [f"- 제목: {translated[0] or title}"] if with_title else []
+    translated = translated[1:] if with_title else translated
+    lines.extend(f"- {t or s}" for s, t in zip(bullets, translated))
+    return "\n".join(lines)
 
 
 def summarize_article(article: Article, full_text: Optional[str], mode: str = "free") -> str:
