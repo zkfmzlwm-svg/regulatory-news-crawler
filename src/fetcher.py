@@ -1,7 +1,10 @@
 import logging
-from typing import Optional, Tuple
+import re
+from typing import List, Optional, Tuple
+from urllib.parse import quote, urlparse
 
 import trafilatura
+from bs4 import BeautifulSoup
 
 from .net import http_get
 from .utils import is_pdf_url
@@ -9,6 +12,48 @@ from .utils import is_pdf_url
 logger = logging.getLogger(__name__)
 
 MIN_PRECISE_LEN = 800
+
+# ICH 사이트(www.ich.org)는 자바스크립트로 그려져 페이지 HTML 에 본문이 없다.
+# 페이지가 쓰는 API 에 주소(alias)를 넘기면 본문 문단(HTML)을 JSON 으로 준다.
+ICH_HOSTS = ("www.ich.org", "ich.org")
+ICH_NODE_API = "https://admin.ich.org/api/v1/nodes?loadEntities%5B%5D=paragraph&alias="
+_BLOCK_TAGS = ["p", "li", "h1", "h2", "h3", "h4", "h5", "h6"]
+
+
+def _collect_texts(node, out: List[str]) -> None:
+    """API 응답 안의 문단 위젯("text" 항목, HTML)을 순서대로 모은다."""
+    if isinstance(node, dict):
+        if isinstance(node.get("text"), str):
+            out.append(node["text"])
+        for value in node.values():
+            _collect_texts(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            _collect_texts(value, out)
+
+
+def _fetch_ich(url: str) -> Tuple[Optional[str], Optional[str]]:
+    path = urlparse(url).path
+    try:
+        items = http_get(ICH_NODE_API + quote(path)).json().get("items") or []
+    except Exception as exc:
+        logger.warning("ICH 본문 API 실패 (%s): %s", url, exc)
+        return None, None
+    if not items:
+        return None, None
+    title = re.sub(r"\s+", " ", (items[0].get("bundleInfo") or {}).get("title") or "").strip() or None
+    htmls: List[str] = []
+    _collect_texts(items[0].get("mainWidgets"), htmls)
+    blocks = []
+    for html in htmls:
+        soup = BeautifulSoup(html, "lxml")
+        for el in soup.find_all(_BLOCK_TAGS):
+            if el.find(_BLOCK_TAGS):  # 목록 안의 문단 등 중첩된 블록은 안쪽에서 처리
+                continue
+            text = re.sub(r"\s+", " ", el.get_text(" ", strip=True)).strip()
+            if text:
+                blocks.append(text)
+    return title, ("\n".join(blocks) or None)
 
 
 def _strip_site_name(title: str) -> str:
@@ -29,6 +74,8 @@ def fetch_page(url: str) -> Tuple[Optional[str], Optional[str]]:
     if is_pdf_url(url):
         logger.info("PDF 문서는 본문을 추출하지 않음 (%s)", url)
         return None, None
+    if urlparse(url).netloc.lower() in ICH_HOSTS:
+        return _fetch_ich(url)
     try:
         resp = http_get(url)
     except Exception as exc:

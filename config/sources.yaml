@@ -225,6 +225,38 @@ sources:
     include_title_pattern: "薬|医療機器|ワクチン|治験|再生医療|PMDA|ＰＭＤＡ|GMP|ＧＭＰ|化粧品|体外診断|バイオ|ジェネリック"
     exclude_link_pattern: "/saiyo/"   # 약학 기술직 채용 공고 제외
 
+  # ICH 사이트는 자바스크립트로 그려져 RSS·HTML 목록이 없어, 사이트가 쓰는 뉴스 API 를 사용 (한 달 2~3건)
+  # API 는 한 번에 10건까지만 준다 (약 6개월치)
+  # 기사 본문도 같은 API 에서 가져온다 (src/fetcher.py)
+  - name: "ICH - News"
+    type: json
+    url: "https://admin.ich.org/api/v1/nodes?bundle=news&offset=0&limit=10&sort=date:DESC,created:desc"
+    link_prefix: "https://www.ich.org"
+    region: "Global"
+    tag: "ICH"
+    enabled: true
+    fields:
+      items: "items"
+      title: "bundleInfo.title"
+      link: "bundleInfo.alias"
+      date: "date"
+      summary: "summary"
+
+  # 총회(Assembly) 보도자료. 1년에 2번 정도라 '기간 내 기사 없음'(△) 이 대부분 정상
+  - name: "ICH - Press Releases"
+    type: json
+    url: "https://admin.ich.org/api/v1/nodes?bundle=press_release&offset=0&limit=10&sort=date:DESC,created:desc"
+    link_prefix: "https://www.ich.org"
+    region: "Global"
+    tag: "ICH"
+    enabled: true
+    fields:
+      items: "items"
+      title: "bundleInfo.title"
+      link: "bundleInfo.alias"
+      date: "date"
+      summary: "summary"
+
   # ---------------- 사이트 추가 예시 (참고용) ----------------
   # - name: "My Custom Source"
   #   type: html
