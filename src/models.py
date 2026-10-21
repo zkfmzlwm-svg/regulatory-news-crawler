@@ -10,6 +10,7 @@ class Article:
     region: str = ""
     tag: str = ""
     title: str = ""
+    title_ko: str = ""  # 목록 화면용 제목 단순 번역 (번역 전이면 빈 값)
     url: str = ""
     published_at: Optional[str] = None  # ISO 8601 string
     excerpt: str = ""

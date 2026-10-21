@@ -23,6 +23,7 @@ from src.summarizer import (
     output_extension,
     render_txt,
     summarize_article,
+    translate_titles,
     write_summaries,
 )
 from src.utils import clean_text, local_date
@@ -31,6 +32,7 @@ UI_FONT = ("Malgun Gothic", 10)
 LIST_LIMIT = 300
 ALL_TAGS = "전체"
 NEW_ROW_COLOR = "#fff4c2"
+TITLE_CHUNK = 50  # 제목 번역 결과를 화면에 반영하는 단위
 
 
 class App(Tk):
@@ -47,6 +49,8 @@ class App(Tk):
         self.selected_ids = set()
         self.last_output_path = None
         self.new_since = None  # 이번 실행에서 마지막 수집을 시작한 시각 (그 뒤로 저장된 기사 = 신규)
+        self.translating_titles = False
+        self.title_failed_ids = set()  # 이번 실행에서 제목 번역에 실패한 기사 (계속 재시도하지 않도록)
         self.task_queue = queue.Queue()
 
         self._build_ui()
@@ -127,12 +131,19 @@ class App(Tk):
         list_frame = ttk.Frame(list_pane)
         list_frame.pack(fill="both", expand=True)
 
-        columns = ("select", "date", "source", "title", "summarized")
+        columns = ("select", "date", "source", "title", "title_ko", "summarized")
         self.tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="none", height=5)
-        headers = {"select": "선택", "date": "날짜", "source": "출처", "title": "제목", "summarized": "요약됨"}
-        widths = {"select": 50, "date": 90, "source": 110, "title": 620, "summarized": 60}
-        anchors = {"select": "center", "date": "center", "source": "w", "title": "w", "summarized": "center"}
-        stretch = {"title": True}
+        headers = {
+            "select": "선택",
+            "date": "날짜",
+            "source": "출처",
+            "title": "제목(원문)",
+            "title_ko": "제목(국문)",
+            "summarized": "요약됨",
+        }
+        widths = {"select": 50, "date": 90, "source": 110, "title": 380, "title_ko": 340, "summarized": 60}
+        anchors = {"select": "center", "date": "center", "source": "w", "title": "w", "title_ko": "w", "summarized": "center"}
+        stretch = {"title": True, "title_ko": True}
         for col in columns:
             self.tree.heading(col, text=headers[col])
             self.tree.column(col, width=widths[col], anchor=anchors[col], stretch=stretch.get(col, False))
@@ -198,10 +209,37 @@ class App(Tk):
                 "",
                 "end",
                 iid=str(a.id),
-                values=(mark, local_date(a.published_at), a.tag or a.source, clean_text(a.title), done),
+                values=(mark, local_date(a.published_at), a.tag or a.source, clean_text(a.title), a.title_ko, done),
                 tags=("new",) if is_new else (),
             )
         self._update_selection_label()
+        self._translate_missing_titles()
+
+    def _translate_missing_titles(self):
+        """목록에 보이는 기사 중 국문 제목이 없는 것을 백그라운드에서 번역해 DB 에 저장."""
+        if self.translating_titles:
+            return
+        todo = [a for a in self.articles if not a.title_ko and a.id not in self.title_failed_ids]
+        if not todo:
+            return
+        self.translating_titles = True
+        threading.Thread(target=self._title_worker, args=(todo,), daemon=True).start()
+
+    def _title_worker(self, articles):
+        error = None
+        for start in range(0, len(articles), TITLE_CHUNK):
+            chunk = articles[start:start + TITLE_CHUNK]
+            try:
+                translated = translate_titles([a.title for a in chunk])
+            except Exception as exc:
+                error = str(exc)
+                self.task_queue.put(("titles_failed", [a.id for a in articles[start:]]))
+                break
+            titles = {a.id: ko for a, ko in zip(chunk, translated) if ko}
+            self.store.set_title_ko(titles)
+            failed = [a.id for a in chunk if a.id not in titles]
+            self.task_queue.put(("titles_translated", (titles, failed)))
+        self.task_queue.put(("titles_done", error))
 
     def _update_selection_label(self):
         shown = len(self.articles)
@@ -263,6 +301,7 @@ class App(Tk):
     def start_crawl(self):
         self.crawl_btn.config(state="disabled", text="수집 중...")
         self.new_since = datetime.now(timezone.utc).isoformat()
+        self.title_failed_ids.clear()  # 지난번 제목 번역에 실패한 기사는 수집 후 다시 시도
         self.status_var.set(f"등록된 사이트에서 최근 {RECENT_DAYS}일 이내 기사를 가져오는 중...")
         threading.Thread(target=self._crawl_worker, daemon=True).start()
 
@@ -445,6 +484,24 @@ class App(Tk):
             self.last_output_path = output_path
             self.result_text.delete("1.0", "end")
             self.result_text.insert("1.0", preview)
+        elif kind == "titles_translated":
+            titles, failed = payload
+            self.title_failed_ids.update(failed)
+            by_id = {a.id: a for a in self.articles}
+            for aid, ko in titles.items():
+                if aid in by_id:
+                    by_id[aid].title_ko = ko
+                if self.tree.exists(str(aid)):
+                    self.tree.set(str(aid), "title_ko", ko)
+        elif kind == "titles_failed":
+            self.title_failed_ids.update(payload)
+        elif kind == "titles_done":
+            self.translating_titles = False
+            if payload:
+                self.status_var.set(f"제목 번역 실패 (원문 제목만 표시): {payload}")
+            else:
+                # 번역하는 동안 검색·필터를 바꿨으면 새로 보이는 기사도 이어서 번역
+                self._translate_missing_titles()
         elif kind == "summarize_error":
             self._set_summarizing(False)
             self.status_var.set("요약 실패")

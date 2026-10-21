@@ -268,6 +268,23 @@ def _summarize_free_translate(article: Article, full_text: Optional[str]) -> str
     return "\n".join(lines)
 
 
+TITLE_BATCH = 25
+_HANGUL = re.compile(r"[\uac00-\ud7a3]")
+
+
+def translate_titles(titles: List[str]) -> List[str]:
+    """목록 화면용 제목 단순 번역 (한국어). 이미 한글 제목은 그대로 둔다. 실패하면 TranslationError."""
+    titles = [clean_text(t) for t in titles]
+    todo = [i for i, t in enumerate(titles) if t and not _HANGUL.search(t)]
+    out = list(titles)
+    for start in range(0, len(todo), TITLE_BATCH):
+        chunk = todo[start:start + TITLE_BATCH]
+        translated = translate_texts([_to_western_year(titles[i]) for i in chunk], target="ko")
+        for i, t in zip(chunk, translated):
+            out[i] = t.strip()
+    return out
+
+
 def summarize_article(article: Article, full_text: Optional[str], mode: str = "free") -> str:
     """체크한 기사 본문을 요약해 body(불릿 텍스트)를 반환. API 키 불필요.
 

@@ -31,10 +31,11 @@ class Storage:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(SCHEMA)
-            try:
-                conn.execute("ALTER TABLE articles ADD COLUMN tag TEXT")
-            except sqlite3.OperationalError:
-                pass  # column already exists (pre-existing DB)
+            for column in ("tag", "title_ko"):
+                try:
+                    conn.execute(f"ALTER TABLE articles ADD COLUMN {column} TEXT")
+                except sqlite3.OperationalError:
+                    pass  # column already exists (pre-existing DB)
 
     @contextmanager
     def _connect(self):
@@ -83,9 +84,9 @@ class Storage:
             query += " AND COALESCE(NULLIF(tag, ''), source) = ?"
             params.append(tag)
         if keyword:
-            query += " AND (title LIKE ? OR excerpt LIKE ?)"
+            query += " AND (title LIKE ? OR title_ko LIKE ? OR excerpt LIKE ?)"
             like = f"%{keyword}%"
-            params.extend([like, like])
+            params.extend([like, like, like])
         if checked_only:
             query += " AND checked = 1"
         if unchecked_only:
@@ -160,6 +161,16 @@ class Storage:
             )
         return cur.rowcount
 
+    def set_title_ko(self, titles: Dict[int, str]) -> None:
+        """{기사 id: 번역한 제목} 저장."""
+        if not titles:
+            return
+        with self._connect() as conn:
+            conn.executemany(
+                "UPDATE articles SET title_ko = ? WHERE id = ?",
+                [(ko, aid) for aid, ko in titles.items()],
+            )
+
     @staticmethod
     def _row_to_article(row: sqlite3.Row) -> Article:
         return Article(
@@ -168,6 +179,7 @@ class Storage:
             region=row["region"] or "",
             tag=row["tag"] or "",
             title=row["title"],
+            title_ko=row["title_ko"] or "",
             url=row["url"],
             published_at=row["published_at"],
             excerpt=row["excerpt"] or "",
