@@ -7,7 +7,7 @@ import trafilatura
 from bs4 import BeautifulSoup
 
 from .net import http_get
-from .utils import is_pdf_url
+from .utils import clean_text, is_pdf_url, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,50 @@ def _collect_texts(node, out: List[str]) -> None:
     elif isinstance(node, list):
         for value in node:
             _collect_texts(value, out)
+
+
+def _fetch_ich_guideline(url: str, anchor: str) -> Tuple[Optional[str], Optional[str]]:
+    """가이드라인 목록 페이지(#코드-step-n)에서 그 가이드라인 한 건의 설명만 꺼낸다 (페이지 전체는 수십 건)."""
+    from .crawler import ICH_GUIDELINE_API, _STEP_LABEL, find_ich_guidelines, ich_guideline_anchor
+
+    try:
+        data = http_get(ICH_GUIDELINE_API + quote(urlparse(url).path)).json()
+    except Exception as exc:
+        logger.warning("ICH 가이드라인 API 실패 (%s): %s", url, exc)
+        return None, None
+    for g in find_ich_guidelines(data, []):
+        details = g.get("details") or {}
+        code = clean_text(str(g.get("code") or ""))
+        m = _STEP_LABEL.search(clean_text(str(details.get("stepDateLabel") or "")))
+        step = m.group(0) if m else clean_text(str(g.get("status") or ""))
+        if ich_guideline_anchor(code, step) != anchor:
+            continue
+        name = clean_text(str(g.get("title") or ""))
+        lines = [clean_text(str(g.get("description") or ""))]
+        if details.get("stepDate"):
+            lines.append(f"{code} reached {step} of the ICH process on {clean_text(str(details['stepDate']))}.")
+        if g.get("status"):
+            lines.append(f"Current status: {clean_text(str(g['status']))}.")
+        return (f"{code}: {name}" if name else code), ("\n".join(x for x in lines if x) or None)
+    return None, None
+
+
+def _fetch_section(content: bytes, anchor: str) -> Tuple[Optional[str], Optional[str]]:
+    """한 페이지에 글 여러 개가 이어진 사이트(예: PIC/S News)에서 제목이 anchor 인 글 한 건만 꺼낸다."""
+    soup = BeautifulSoup(content, "lxml")
+    for heading in soup.find_all(["h1", "h2", "h3", "h4"]):
+        title = clean_text(heading.get_text(" ", strip=True))
+        if slugify(title) != anchor or heading.parent is None:
+            continue
+        blocks = []
+        for el in heading.parent.find_all(_BLOCK_TAGS):
+            if el is heading or el.find(_BLOCK_TAGS):
+                continue
+            text = re.sub(r"\s+", " ", el.get_text(" ", strip=True)).strip()
+            if text:
+                blocks.append(text)
+        return title, ("\n".join(blocks) or None)
+    return None, None
 
 
 def _fetch_ich(url: str) -> Tuple[Optional[str], Optional[str]]:
@@ -74,7 +118,10 @@ def fetch_page(url: str) -> Tuple[Optional[str], Optional[str]]:
     if is_pdf_url(url):
         logger.info("PDF 문서는 본문을 추출하지 않음 (%s)", url)
         return None, None
+    anchor = urlparse(url).fragment
     if urlparse(url).netloc.lower() in ICH_HOSTS:
+        if anchor and urlparse(url).path.endswith("-guidelines"):
+            return _fetch_ich_guideline(url, anchor)
         return _fetch_ich(url)
     try:
         resp = http_get(url)
@@ -84,6 +131,11 @@ def fetch_page(url: str) -> Tuple[Optional[str], Optional[str]]:
     if resp.content[:5] == b"%PDF-":
         logger.info("PDF 문서는 본문을 추출하지 않음 (%s)", url)
         return None, None
+
+    if anchor:
+        section = _fetch_section(resp.content, anchor)
+        if section[1]:
+            return section
 
     # resp.text 는 헤더에 charset 이 없으면 ISO-8859-1 로 잘못 디코딩해 글자가 깨지므로,
     # 원본 바이트를 넘겨 trafilatura 가 <meta charset> 으로 직접 판단하게 한다.
