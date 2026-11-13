@@ -36,3 +36,8 @@ def local_date(iso: Optional[str]) -> str:
 
 def is_pdf_url(url: str) -> bool:
     return urlparse(url or "").path.lower().endswith(".pdf")
+
+
+def slugify(text: str) -> str:
+    """"Q3C(R9) Maintenance" -> "q3c-r9-maintenance". 기사 주소가 없는 목록에서 항목별 주소(#...)를 만들 때 쓴다."""
+    return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")

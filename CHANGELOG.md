@@ -2,6 +2,23 @@
 
 버전 규칙: 0.1 → 0.2 → 0.3 … 순으로 올리며, 공식 사용 전까지는 0.x 로 운영한다.
 
+## v0.11 — 2026-11-13
+
+- 수집 사이트 추가: EC - Medicinal Products (Latest Updates), 태그 `[EC]`
+  - 유럽 집행위원회(DG SANTE) 의약품 분야 새 소식 (`health.ec.europa.eu/medicinal-products/latest-updates_en`)
+  - EudraLex(Volume 4 GMP 등) 개정, 약사위원회 회의 자료, Q&A, 보도자료. 한 달 2~4건
+- 수집 사이트 추가: PIC/S - News / PIC/S - Publications, 태그 `[PIC/S]`
+  - News 는 기사별 주소 없이 한 페이지에 글이 이어져 있어 "목록주소#제목" 을 기사 주소로 쓰고, 요약할 때 그 글 한 건만 꺼냄
+  - Publications 는 발간물(GMP Guide, Recommendation 등)을 최근 등록순으로 15건. 링크는 PDF 문서
+- 수집 사이트 추가: APIC - Publications, 태그 `[APIC]`
+  - APIC 사이트는 뉴스 메뉴·RSS 가 없어(피드는 비어 있음) 발간물 목록(가이드·Position Paper·템플릿)을 수집. 1년에 10건 안팎
+- 수집 사이트 추가: ICH - Guidelines (Step 2b / Step 4), 태그 `[ICH]`
+  - Quality/Safety/Efficacy/Multidisciplinary 가이드라인 목록에서 Step 2b(의견 수렴안)·Step 4(최종 채택) 도달일을 수집
+  - 가이드라인이 새 단계에 오르면 새 기사로 수집됨. 1년에 몇 건뿐이라 '기간 내 기사 없음'(△) 이 대부분 정상
+- 사이트 설정 옵션 추가: `selectors.title_as_link`(기사별 주소가 없는 목록), `selectors.date_dayfirst`(13/10/2026 같은 일/월/년 날짜),
+  `type: ich_guidelines` + `more_urls`(ICH 가이드라인 목록 전용)
+- html 타입: 링크 주소 끝에 붙은 공백 제거
+
 ## v0.10 — 2026-10-21
 
 - 기사 목록의 제목 칸을 **제목(원문)** / **제목(국문)** 두 칸으로 분리
