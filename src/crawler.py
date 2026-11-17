@@ -13,7 +13,7 @@ from dateutil import parser as dateparser
 
 from .models import Article
 from .net import describe_error, http_get
-from .utils import clean_text
+from .utils import clean_text, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +57,12 @@ def save_sources(config_path: str, sources: List[Dict]) -> None:
         yaml.safe_dump({"sources": sources}, f, allow_unicode=True, sort_keys=False)
 
 
-def _normalize_date(value) -> Optional[str]:
+def _normalize_date(value, dayfirst: bool = False) -> Optional[str]:
     if not value:
         return None
     try:
         if isinstance(value, str):
-            dt = _parse_date_text(value)
+            dt = _parse_date_text(value, dayfirst)
         else:
             dt = datetime.fromtimestamp(timegm(value), tz=timezone.utc)
         if dt is None:
@@ -74,15 +74,16 @@ def _normalize_date(value) -> Optional[str]:
         return None
 
 
-def _parse_date_text(value: str) -> Optional[datetime]:
+def _parse_date_text(value: str, dayfirst: bool = False) -> Optional[datetime]:
     try:
         # 04.03.2025 처럼 점으로 구분된 숫자 날짜는 유럽식(일.월.년)이다
-        return dateparser.parse(value, dayfirst=bool(_DOTTED_DATE.match(value)))
+        # 13/10/2026 처럼 빗금으로 쓴 날짜는 사이트마다 달라 selectors.date_dayfirst 로 지정한다 (예: APIC)
+        return dateparser.parse(value, dayfirst=dayfirst or bool(_DOTTED_DATE.match(value)))
     except (ValueError, OverflowError):
         m = _DATE_IN_TEXT.search(value)
         if not m:
             raise
-        return dateparser.parse(m.group(0))
+        return dateparser.parse(m.group(0), dayfirst=dayfirst)
 
 
 def _clean_excerpt(text: str) -> str:
@@ -147,12 +148,12 @@ def crawl_rss(source: Dict) -> List[Article]:
     return articles
 
 
-def _date_from_element(el, attr: Optional[str] = None) -> Optional[str]:
+def _date_from_element(el, attr: Optional[str] = None, dayfirst: bool = False) -> Optional[str]:
     if attr:
         # 화면에 날짜가 없는 사이트는 이미지 주소 등 속성 값에 든 날짜를 쓴다 (selectors.date_attr)
-        return _normalize_date(el.get(attr) or "")
+        return _normalize_date(el.get(attr) or "", dayfirst)
     # <time datetime="2025-03-04"> 처럼 기계용 날짜 속성이 있으면 화면 표기보다 우선
-    return _normalize_date(el.get("datetime") or el.get_text(strip=True))
+    return _normalize_date(el.get("datetime") or el.get_text(" ", strip=True), dayfirst)
 
 
 def _articles_by_link_pattern(soup, page_url: str, pattern: str, make_article) -> List[Article]:
@@ -183,6 +184,9 @@ def crawl_html(source: Dict) -> List[Article]:
     link_sel = selectors.get("link", title_sel)
     date_sel = selectors.get("date")
     date_attr = selectors.get("date_attr")
+    date_dayfirst = bool(selectors.get("date_dayfirst"))
+    # 기사별 주소 없이 한 페이지에 글이 죽 이어진 사이트(예: PIC/S News)는 "목록주소#제목" 을 기사 주소로 쓴다
+    title_as_link = bool(selectors.get("title_as_link"))
     summary_sel = selectors.get("summary")
     link_pattern = selectors.get("link_pattern")
 
@@ -212,8 +216,11 @@ def crawl_html(source: Dict) -> List[Article]:
             if not title_el:
                 continue
             title = clean_text(title_el.get_text(" ", strip=True))
-            link_el = item.select_one(link_sel) if link_sel else title_el
-            href = link_el.get("href") if link_el else None
+            if title_as_link:
+                href = "#" + slugify(title)
+            else:
+                link_el = item.select_one(link_sel) if link_sel else title_el
+                href = (link_el.get("href") or "").strip() if link_el else None
             if not title or not href:
                 continue
 
@@ -221,7 +228,7 @@ def crawl_html(source: Dict) -> List[Article]:
             if date_sel:
                 date_el = item.select_one(date_sel)
                 if date_el:
-                    published = _date_from_element(date_el, date_attr)
+                    published = _date_from_element(date_el, date_attr, date_dayfirst)
 
             excerpt = ""
             if summary_sel:
@@ -229,7 +236,9 @@ def crawl_html(source: Dict) -> List[Article]:
                 if summary_el:
                     excerpt = clean_text(summary_el.get_text(" ", strip=True))[:500]
 
-            articles.append(make_article(title, urljoin(url, href), published, excerpt))
+            # 연도별 보관 목록(?dateselect=2026)에서 읽어도 같은 글은 같은 주소가 되도록 쿼리는 뗀다
+            base = url.split("?")[0] if title_as_link else url
+            articles.append(make_article(title, urljoin(base, href), published, excerpt))
 
     if not articles and link_pattern:
         articles = _articles_by_link_pattern(soup, url, link_pattern, make_article)
@@ -292,6 +301,68 @@ def crawl_json(source: Dict) -> List[Article]:
     return articles
 
 
+ICH_GUIDELINE_API = "https://admin.ich.org/api/v1/nodes?loadEntities%5B%5D=paragraph&alias="
+_STEP_LABEL = re.compile(r"Step\s*\w+")
+
+
+def find_ich_guidelines(node, out: List[Dict]) -> List[Dict]:
+    """ICH 가이드라인 페이지 API 응답에서 가이드라인 항목(code/status/details 를 가진 것)을 모두 찾는다."""
+    if isinstance(node, dict):
+        if "code" in node and "status" in node and "details" in node:
+            out.append(node)
+        for value in node.values():
+            find_ich_guidelines(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            find_ich_guidelines(value, out)
+    return out
+
+
+def ich_guideline_anchor(code: str, step: str) -> str:
+    return slugify(f"{code} {step}")
+
+
+def crawl_ich_guidelines(source: Dict) -> List[Article]:
+    """ICH 가이드라인 목록(Quality/Safety/Efficacy/Multidisciplinary)에서 단계(Step 2b·Step 4) 도달일을 수집.
+
+    url (+ more_urls) 은 가이드라인 페이지 주소 (예: https://www.ich.org/page/quality-guidelines). 페이지는
+    자바스크립트로 그려지므로 같은 내용을 주는 API 에서 읽는다. 가이드라인이 새 단계에 오르면 주소(#코드-step-n)가
+    달라져 새 기사로 수집된다. 두 분야에 같이 실린 가이드라인(예: E14/S7B)은 한 번만 수집한다.
+    """
+    unique: Dict[str, Article] = {}
+    for page_url in [source["url"], *(source.get("more_urls") or [])]:
+        for a in _crawl_ich_guideline_page(source, page_url):
+            unique.setdefault(a.url.split("#", 1)[1], a)
+    return list(unique.values())
+
+
+def _crawl_ich_guideline_page(source: Dict, page_url: str) -> List[Article]:
+    data = http_get(ICH_GUIDELINE_API + urlparse(page_url).path).json()
+    articles: List[Article] = []
+    for g in find_ich_guidelines(data, []):
+        details = g.get("details") or {}
+        published = _normalize_date(str(details.get("stepDate") or ""))
+        code = clean_text(str(g.get("code") or ""))
+        if not published or not code:
+            continue  # 단계 날짜가 없는 작업반(EWG)·교육 자료 항목
+        m = _STEP_LABEL.search(clean_text(str(details.get("stepDateLabel") or "")))
+        step = m.group(0) if m else clean_text(str(g.get("status") or ""))
+        name = clean_text(str(g.get("title") or ""))
+        title = f"{code}{': ' + name if name else ''} - {step}".strip(" -")
+        articles.append(
+            Article(
+                source=source["name"],
+                region=source.get("region", ""),
+                tag=_default_tag(source),
+                title=title,
+                url=f"{page_url.split('#')[0]}#{ich_guideline_anchor(code, step)}",
+                published_at=published,
+                excerpt=clean_text(str(g.get("description") or ""))[:500],
+            )
+        )
+    return articles
+
+
 def _exclude_patterns(source: Dict) -> List[str]:
     value = source.get("exclude_link_pattern") or []
     return [value] if isinstance(value, str) else [str(v) for v in value]
@@ -305,6 +376,8 @@ def _crawl_page(source: Dict) -> List[Article]:
         return crawl_html(source)
     if src_type == "json":
         return crawl_json(source)
+    if src_type == "ich_guidelines":
+        return crawl_ich_guidelines(source)
     raise ValueError(f"알 수 없는 소스 type: {src_type}")
 
 

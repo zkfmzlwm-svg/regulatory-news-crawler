@@ -3,6 +3,7 @@
 # type: rss  -> RSS/Atom 피드 URL (feedparser 사용)
 # type: html -> RSS가 없는 사이트를 위한 목록 페이지 스크래핑 (CSS 선택자 필요)
 # type: json -> 뉴스 목록을 JSON 으로 주는 API (fields 로 항목 경로 지정, 예: WHO)
+# type: ich_guidelines -> ICH 가이드라인 목록 페이지에서 단계(Step 2b·Step 4) 도달일 수집 (ICH 전용, more_urls 로 페이지 추가)
 # tag:  -> 요약 결과 제목에 붙는 "[태그]" 표기 (예: [FDA]). 생략하면 name 앞부분으로 자동 지정
 # exclude_link_pattern: -> 기사 주소에 이 문자열(또는 목록 중 하나)이 들어가면 수집 제외 (예: "/sponsored/")
 # pages / page_start: -> url 에 {page} 를 넣으면 목록을 여러 쪽 넘겨가며 수집 (수집 기간보다 오래된 기사가 나오면 멈춤)
@@ -12,6 +13,8 @@
 # title_remove_pattern: -> 제목에서 지울 부분 (정규식, 예: PMDA 의 "[SHINSA]" 분류 꼬리표)
 # include_title_pattern: -> 제목에 이 패턴(정규식)이 든 기사만 수집 (예: MHLW 에서 의약품 관련만)
 # selectors.date_attr: -> html 타입에서 날짜를 글자 대신 date 요소의 속성 값에서 읽음 (예: img 의 src 주소에 든 날짜)
+# selectors.date_dayfirst: -> true 면 13/10/2026 같은 빗금 날짜를 일/월/년으로 읽음 (예: APIC)
+# selectors.title_as_link: -> true 면 기사별 주소가 없는 목록에서 "목록주소#제목" 을 기사 주소로 씀 (예: PIC/S News)
 #
 # 사이트를 추가하려면 `python main.py add-source` 명령을 쓰거나
 # 이 파일에 직접 항목을 추가하면 됩니다.
@@ -256,6 +259,81 @@ sources:
       link: "bundleInfo.alias"
       date: "date"
       summary: "summary"
+
+  # 가이드라인이 Step 2b(의견 수렴안 공개)·Step 4(최종 채택)에 오른 날짜. Quality/Safety/Efficacy/Multidisciplinary 4개 목록
+  # 1년에 몇 건뿐이라 '기간 내 기사 없음'(△) 이 대부분 정상. 링크는 해당 분야 가이드라인 목록 페이지로 열린다
+  - name: "ICH - Guidelines (Step 2b / Step 4)"
+    type: ich_guidelines
+    url: "https://www.ich.org/page/quality-guidelines"
+    more_urls:
+      - "https://www.ich.org/page/safety-guidelines"
+      - "https://www.ich.org/page/efficacy-guidelines"
+      - "https://www.ich.org/page/multidisciplinary-guidelines"
+    region: "Global"
+    tag: "ICH"
+    enabled: true
+
+  # 유럽 집행위원회(EC, DG SANTE) 의약품 분야 새 소식: EudraLex(Volume 4 GMP 등) 개정, 약사위원회(Pharmaceutical Committee)
+  # 회의 자료, Q&A, 보도자료. 한 달 2~4건 (한 쪽 10건, 0쪽부터 시작)
+  - name: "EC - Medicinal Products (Latest Updates)"
+    type: html
+    url: "https://health.ec.europa.eu/medicinal-products/latest-updates_en?page={page}"
+    pages: 3
+    page_start: 0
+    region: "EU"
+    tag: "EC"
+    enabled: true
+    selectors:
+      item: "article.ecl-content-item"
+      title: ".ecl-content-block__title a"
+      link: ".ecl-content-block__title a"
+      date: "time"
+      summary: ".ecl-content-block__description"
+
+  # PIC/S News 는 기사별 주소 없이 한 페이지에 글이 이어져 있어 "목록주소#제목" 을 기사 주소로 쓴다 (올해 글 전체, 한 달 0~2건)
+  # 발행일은 본문 첫 줄 "Geneva, 12 November 2026" 에서 읽는다
+  - name: "PIC/S - News"
+    type: html
+    url: "https://picscheme.org/en/news"
+    region: "Global"
+    tag: "PIC/S"
+    enabled: true
+    selectors:
+      item: "div.pagecontenu:has(h2)"
+      title: "h2"
+      title_as_link: true
+      date: "p"
+      summary: "p:nth-of-type(2)"
+
+  # PIC/S 발간물(GMP Guide, Recommendation, Aide-Memoire 등)을 최근 등록순으로 15건. 링크는 PDF 문서
+  - name: "PIC/S - Publications"
+    type: html
+    url: "https://picscheme.org/en/publications?tri=date"
+    region: "Global"
+    tag: "PIC/S"
+    enabled: true
+    selectors:
+      item: "table.display tbody tr"
+      title: "td a"
+      link: "td a"
+      date: "td[data-order]"
+      date_attr: "data-order"
+      summary: "td:nth-of-type(2)"        # 문서 번호 (예: PI 058-1)
+
+  # APIC(원료의약품위원회, Cefic) 는 뉴스 메뉴·RSS 가 없고(피드는 비어 있음) 발간물 목록만 있다. 날짜는 일/월/년 (13/10/2026)
+  # 가이드·Position Paper·템플릿 등 1년에 10건 안팎. 링크는 대부분 PDF 문서
+  - name: "APIC - Publications"
+    type: html
+    url: "https://apic.cefic.org/publications/"
+    region: "EU"
+    tag: "APIC"
+    enabled: true
+    selectors:
+      item: "div.list-item.publication"
+      title: "h4.list-title a"
+      link: "h4.list-title a"
+      date: "span.list-date"
+      date_dayfirst: true
 
   # ---------------- 사이트 추가 예시 (참고용) ----------------
   # - name: "My Custom Source"
