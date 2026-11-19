@@ -58,21 +58,46 @@ def _fetch_ich_guideline(url: str, anchor: str) -> Tuple[Optional[str], Optional
     return None, None
 
 
+def _block_texts(container, skip=None) -> List[str]:
+    blocks = []
+    for el in container.find_all(_BLOCK_TAGS):
+        if el is skip or el.find(_BLOCK_TAGS):
+            continue
+        text = re.sub(r"\s+", " ", el.get_text(" ", strip=True)).strip()
+        if text:
+            blocks.append(text)
+    return blocks
+
+
+def _element_by_id(soup, anchor: str):
+    """id 가 anchor 인 요소. 같은 id 가 여러 번 나오는 페이지는 수집 때 붙인 "id~2" 로 n 번째 요소를 찾는다."""
+    el = soup.find(id=anchor)
+    if el is not None:
+        return el
+    base, sep, nth = anchor.rpartition("~")
+    if sep and nth.isdigit():
+        found = soup.find_all(id=base)
+        if 0 < int(nth) <= len(found):
+            return found[int(nth) - 1]
+    return None
+
+
 def _fetch_section(content: bytes, anchor: str) -> Tuple[Optional[str], Optional[str]]:
-    """한 페이지에 글 여러 개가 이어진 사이트(예: PIC/S News)에서 제목이 anchor 인 글 한 건만 꺼낸다."""
+    """한 페이지에 글 여러 개가 이어진 사이트(예: PIC/S News, GMPAI 개정 내역)에서 anchor 에 해당하는 글 한 건만 꺼낸다.
+
+    anchor 가 요소 id 면 그 요소(글 묶음)를, 아니면 제목 slug 가 anchor 인 제목의 부모 요소를 쓴다.
+    """
     soup = BeautifulSoup(content, "lxml")
+    container = _element_by_id(soup, anchor)
+    if container is not None and container.name not in ("h1", "h2", "h3", "h4"):
+        heading = container.find(["h1", "h2", "h3", "h4"])
+        title = clean_text(heading.get_text(" ", strip=True)) if heading else None
+        return title, ("\n".join(_block_texts(container, heading)) or None)
     for heading in soup.find_all(["h1", "h2", "h3", "h4"]):
         title = clean_text(heading.get_text(" ", strip=True))
         if slugify(title) != anchor or heading.parent is None:
             continue
-        blocks = []
-        for el in heading.parent.find_all(_BLOCK_TAGS):
-            if el is heading or el.find(_BLOCK_TAGS):
-                continue
-            text = re.sub(r"\s+", " ", el.get_text(" ", strip=True)).strip()
-            if text:
-                blocks.append(text)
-        return title, ("\n".join(blocks) or None)
+        return title, ("\n".join(_block_texts(heading.parent, heading)) or None)
     return None, None
 
 
