@@ -15,6 +15,8 @@
 # selectors.date_attr: -> html 타입에서 날짜를 글자 대신 date 요소의 속성 값에서 읽음 (예: img 의 src 주소에 든 날짜)
 # selectors.date_dayfirst: -> true 면 13/10/2026 같은 빗금 날짜를 일/월/년으로 읽음 (예: APIC)
 # selectors.title_as_link: -> true 면 기사별 주소가 없는 목록에서 "목록주소#제목" 을 기사 주소로 씀 (예: PIC/S News)
+# selectors.link_from_id: -> true 면 각 기사 블록의 id 로 "목록주소#id" 를 기사 주소로 씀 (한글 제목처럼 slug 가 안 될 때, 예: GMPAI)
+# selectors.label: -> 이 선택자들(쉼표로 여러 개)의 글자를 "[A · B · C] 제목" 처럼 제목 앞에 붙임 (예: GMPAI 기관·구분·문서번호)
 #
 # 사이트를 추가하려면 `python main.py add-source` 명령을 쓰거나
 # 이 파일에 직접 항목을 추가하면 됩니다.
@@ -334,6 +336,25 @@ sources:
       link: "h4.list-title a"
       date: "span.list-date"
       date_dayfirst: true
+
+  # GMPAI(제약바이오의 정석) 가이드라인 한글판 사이트의 '최근 개정 내역'. ICH·EU GMP·PIC/S·FDA 가이드라인의
+  # 시행·개정·초안 공개 소식을 한글로 정리한 페이지 (한 달 5~10건, 전체 약 50건이 한 페이지에 있음)
+  # 기사별 주소가 없어 각 글의 id 로 "news.html#n-ich-e24-2026-11-15" 같은 주소를 만들고, 요약할 때 그 글 한 건만 꺼냄
+  # 제목 앞에 [기관 · 구분 · 문서번호] 를 붙인다 (예: [ICH · 개정 착수 · E24] 희귀질환 …). 본문이 한글이라 번역하지 않음
+  # (가이드라인 목록 465건은 원본 발행일만 있어 새 번역이 올라와도 기간 안에 안 잡히므로 수집하지 않음)
+  - name: "GMPAI - Guideline Revisions (KR)"
+    type: html
+    url: "https://gmpai.co.kr/guidelines/news.html"
+    region: "KR"
+    tag: "GMPAI"
+    enabled: true
+    selectors:
+      item: "article.nw-item"
+      title: "h2"
+      link_from_id: true
+      label: ".nw-meta > .nw-org, .nw-meta > .nw-chip:not(.nw-wait), .nw-meta > span:last-child"
+      date: "time"
+      summary: "ul"
 
   # ---------------- 사이트 추가 예시 (참고용) ----------------
   # - name: "My Custom Source"

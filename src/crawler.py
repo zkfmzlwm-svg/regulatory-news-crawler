@@ -187,6 +187,10 @@ def crawl_html(source: Dict) -> List[Article]:
     date_dayfirst = bool(selectors.get("date_dayfirst"))
     # 기사별 주소 없이 한 페이지에 글이 죽 이어진 사이트(예: PIC/S News)는 "목록주소#제목" 을 기사 주소로 쓴다
     title_as_link = bool(selectors.get("title_as_link"))
+    # 기사마다 id 가 붙은 글 묶음 페이지(예: GMPAI 개정 내역)는 "목록주소#id" 를 기사 주소로 쓴다 (한글 제목은 slug 가 안 됨)
+    link_from_id = bool(selectors.get("link_from_id"))
+    # 제목만으로는 무엇인지 모르는 경우("단계 변경: → Step 1") 기관·단계·문서번호 등을 "[ICH · 개정 · S13 EWG] 제목" 으로 붙인다
+    label_sel = selectors.get("label")
     summary_sel = selectors.get("summary")
     link_pattern = selectors.get("link_pattern")
 
@@ -211,12 +215,25 @@ def crawl_html(source: Dict) -> List[Article]:
 
     articles: List[Article] = []
     if item_sel and title_sel:
+        used_ids: Dict[str, int] = {}
         for item in soup.select(item_sel):
             title_el = item.select_one(title_sel)
             if not title_el:
                 continue
             title = clean_text(title_el.get_text(" ", strip=True))
-            if title_as_link:
+            if label_sel:
+                parts = [clean_text(el.get_text(" ", strip=True)) for el in item.select(label_sel)]
+                label = " · ".join(p for p in parts if p)
+                if label and title:
+                    title = f"[{label}] {title}"
+            if link_from_id:
+                anchor = (item.get("id") or "").strip()
+                # 같은 id 가 두 번 이상 나오면(사이트 실수) 두 번째부터 "id~2" 로 구분해 둘 다 남긴다
+                used_ids[anchor] = used_ids.get(anchor, 0) + 1
+                if anchor and used_ids[anchor] > 1:
+                    anchor = f"{anchor}~{used_ids[anchor]}"
+                href = "#" + anchor if anchor else None
+            elif title_as_link:
                 href = "#" + slugify(title)
             else:
                 link_el = item.select_one(link_sel) if link_sel else title_el
@@ -237,7 +254,7 @@ def crawl_html(source: Dict) -> List[Article]:
                     excerpt = clean_text(summary_el.get_text(" ", strip=True))[:500]
 
             # 연도별 보관 목록(?dateselect=2026)에서 읽어도 같은 글은 같은 주소가 되도록 쿼리는 뗀다
-            base = url.split("?")[0] if title_as_link else url
+            base = url.split("?")[0] if (title_as_link or link_from_id) else url
             articles.append(make_article(title, urljoin(base, href), published, excerpt))
 
     if not articles and link_pattern:

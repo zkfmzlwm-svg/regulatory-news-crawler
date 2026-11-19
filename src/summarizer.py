@@ -20,7 +20,7 @@ _HEADING_MAX_WORDS = 12
 _ABBREVIATIONS = [
     "Mr", "Ms", "Mrs", "Dr", "St", "No", "vs", "Inc", "Ltd", "Co", "Corp", "Fig", "approx",
     "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec", "e.g", "i.e",
-    "Ph", "Eur", "Pharm", "Ref", "Vol", "Art", "Sec",
+    "Ph", "Eur", "Pharm", "Ref", "Vol", "Art", "Sec", "Rev",
     "Gov", "Sen", "Rep", "Gen", "Jr", "Sr", "Prof", "Dept", "Univ",
 ]
 
@@ -88,6 +88,17 @@ def _to_western_year(text: str) -> str:
 
 def _is_cjk(text: str) -> bool:
     return len(_CJK_CHAR.findall(text)) * 3 >= len(text)
+
+
+# 한글 본문(예: GMPAI 개정 내역): 문장이 "~함", "~음" 처럼 마침표 없이 끝나 영어 규칙으로는 소제목으로 버려지므로
+# 줄(항목) 하나를 문장 하나로 보고, 번역 요약에서도 번역하지 않는다
+_HANGUL_CHAR = re.compile(r"[\uac00-\ud7a3]")
+_KO_MIN_CHARS = 10
+
+
+def _is_korean(text: str) -> bool:
+    letters = sum(c.isalpha() for c in text)
+    return bool(letters) and len(_HANGUL_CHAR.findall(text)) * 3 >= letters
 
 
 def _has_cjk(text: str) -> bool:
@@ -188,6 +199,15 @@ def _extract_sentences(article: Article, full_text: Optional[str]) -> List[str]:
         # 본문 첫 줄에 반복되는 기사 제목과, 문장이 아닌 짧은 소제목("Background", "What you should do" 등)은 건너뛴다
         if not para or _is_title(para, title) or _BOILERPLATE.match(para):
             continue
+        if _is_korean(para):
+            if len(para) >= _KO_MIN_CHARS and para.lower() not in seen:
+                seen.add(para.lower())
+                sentences.append(para)
+            elif len(para) >= 5:
+                headings.append(para)
+            if len(sentences) >= MAX_BULLETS:
+                break
+            continue
         if _is_cjk(para):
             if _JP_CONTACT.search(para):
                 continue
@@ -256,12 +276,19 @@ def _summarize_free_translate(article: Article, full_text: Optional[str]) -> str
     # 일본어 제목(MHLW 등)은 요약 제목 줄에 원문 그대로 나가므로, 번역한 제목을 첫 줄에 붙인다
     title = clean_text(article.title)
     with_title = _has_cjk(title) and title not in bullets
-    texts = [_to_western_year(t) for t in ([title] if with_title else []) + bullets]
-    try:
-        translated = translate_texts(texts, target="ko")
-    except TranslationError as exc:
-        logger.warning("번역 실패, 원문 유지 (%s): %s", article.title, exc)
-        return "\n".join(f"- {s} (번역 실패)" for s in bullets)
+    texts = ([title] if with_title else []) + bullets
+    # 이미 한글인 문장은 번역하지 않는다. 한글 사이트(GMPAI 등) 기사는 함께 실린 영문 원제목도 그대로 둔다
+    korean_site = bool(_HANGUL_CHAR.search(title))
+    todo = [] if korean_site else [i for i, t in enumerate(texts) if not _is_korean(t)]
+    translated = list(texts)
+    if todo:
+        try:
+            done = translate_texts([_to_western_year(texts[i]) for i in todo], target="ko")
+        except TranslationError as exc:
+            logger.warning("번역 실패, 원문 유지 (%s): %s", article.title, exc)
+            return "\n".join(f"- {s}" if _is_korean(s) else f"- {s} (번역 실패)" for s in bullets)
+        for i, t in zip(todo, done):
+            translated[i] = t
     lines = [f"- 제목: {translated[0] or title}"] if with_title else []
     translated = translated[1:] if with_title else translated
     lines.extend(f"- {t or s}" for s, t in zip(bullets, translated))
